@@ -69,7 +69,7 @@ const VO_LINES = {
   opp_giveup: ['narrator', 'No combination could save the real Opportunity. Its panels were buried in dust, the cold may have damaged its battery, and more than a thousand wake-up calls went unanswered.'],
 };
 const VO = (() => {
-  const st = { q: [], cur: null, muted: false, tts: true, el: null, btn: null, timer: 0, typeT: 0, audio: null, ac: null, voices: [] };
+  const st = { q: [], cur: null, muted: false, tts: true, el: null, btn: null, timer: 0, typeT: 0, typing: false, reveal: null, audio: null, ac: null, voices: [], said: new Set(), base: 130 };
   try { st.muted = localStorage.getItem('reclaimMute') === '1'; } catch (e) {}
   // which recorded files exist: audio/vo/manifest.json is a JSON array of line ids
   const files = fetch('audio/vo/manifest.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : []).then(a => new Set(Array.isArray(a) ? a : [])).catch(() => new Set());
@@ -77,11 +77,13 @@ const VO = (() => {
   function init(opt = {}) {
     if (st.el) return;
     const css = document.createElement('style');
-    css.textContent = '#voSub{position:fixed;left:50%;transform:translateX(-50%);z-index:12;width:min(760px,calc(100vw - 32px));pointer-events:none;opacity:0;transition:opacity .4s;text-align:left;background:rgba(3,6,11,.82);border:1px solid rgba(70,217,255,.35);border-radius:8px;padding:10px 16px;font:500 1.02rem/1.45 "Chakra Petch","Segoe UI",system-ui,sans-serif;color:#eef6fa;box-shadow:0 0 30px rgba(0,0,0,.5)}' +
-      '#voSub .who{font:700 .68rem "Space Mono",ui-monospace,monospace;letter-spacing:.14em;margin-bottom:3px}#voSub .cur{display:inline-block;width:.5em;height:1em;background:currentColor;vertical-align:-2px;margin-left:2px;animation:voB 1s steps(1) infinite}@keyframes voB{50%{opacity:0}}' +
+    css.textContent = '#voSub{position:fixed;left:50%;transform:translateX(-50%);z-index:12;width:min(760px,calc(100vw - 32px));pointer-events:none;opacity:0;transition:opacity .4s,bottom .3s;text-align:left;background:rgba(3,6,11,.86);border:1px solid rgba(70,217,255,.35);border-radius:8px;padding:10px 16px;font:500 1.02rem/1.45 "Chakra Petch","Segoe UI",system-ui,sans-serif;color:#eef6fa;box-shadow:0 0 30px rgba(0,0,0,.5);box-sizing:border-box}' +
+      '#voSub .who{display:flex;justify-content:space-between;gap:10px;font:700 .68rem "Space Mono",ui-monospace,monospace;letter-spacing:.14em;margin-bottom:3px}#voSub .key{color:rgba(219,234,242,.5);letter-spacing:.06em;font-weight:400}' +
+      '#voSub .cur{display:inline-block;width:.5em;height:1em;background:currentColor;vertical-align:-2px;margin-left:2px;animation:voB 1s steps(1) infinite}@keyframes voB{50%{opacity:0}}' +
       '#voMute{position:fixed;z-index:13;width:44px;height:44px;border-radius:6px;border:1px solid rgba(70,217,255,.5);background:rgba(4,9,16,.82);color:#dbeaf2;font-size:1.15rem;cursor:pointer}#voMute:hover{background:rgba(70,217,255,.22)}#voMute:focus-visible{outline:2px solid #46d9ff;outline-offset:2px}';
     document.head.appendChild(css);
-    st.el = document.createElement('div'); st.el.id = 'voSub'; st.el.setAttribute('aria-live', 'polite'); st.el.style.bottom = (opt.bottom || 130) + 'px'; document.body.appendChild(st.el);
+    st.base = opt.bottom || 130;
+    st.el = document.createElement('div'); st.el.id = 'voSub'; st.el.setAttribute('aria-live', 'polite'); st.el.style.bottom = st.base + 'px'; document.body.appendChild(st.el);
     st.btn = document.createElement('button'); st.btn.id = 'voMute'; st.btn.type = 'button';
     Object.assign(st.btn.style, opt.mute || { left: '14px', bottom: '14px' });
     st.btn.onclick = () => setMuted(!st.muted); document.body.appendChild(st.btn); paint();
@@ -94,41 +96,65 @@ const VO = (() => {
     try { if (!st.ac) st.ac = new (window.AudioContext || window.webkitAudioContext)(); const s = st.ac.createMediaElementSource(a), hp = st.ac.createBiquadFilter(), lp = st.ac.createBiquadFilter();
       hp.type = 'highpass'; hp.frequency.value = 420; lp.type = 'lowpass'; lp.frequency.value = 3000; s.connect(hp); hp.connect(lp); lp.connect(st.ac.destination); if (st.ac.state === 'suspended') st.ac.resume(); } catch (e) {}
   }
+  /* plays one line and resolves exactly once: when the sound ends, when it is skipped, or after a safety timeout
+     (some browser speech engines never report that they finished, which used to stall the queue) */
   function play(line) {
     return files.then(have => new Promise(done => {
       if (st.muted) return done(false);
-      const a = new Audio(have.has(line.id) ? 'audio/vo/' + line.id + '.mp3' : 'data:,'); st.audio = a; let ended = false; const fin = ok => { if (!ended) { ended = true; done(ok); } };
-      a.onended = () => fin(true);
-      a.onerror = () => { if (st.audio !== a) return fin(false); st.audio = null; if (!st.tts || !window.speechSynthesis || st.muted) return fin(false);
+      let ended = false, guard = 0; const fin = ok => { if (ended) return; ended = true; clearTimeout(guard); done(ok); };
+      const arm = ms => { clearTimeout(guard); guard = setTimeout(() => fin(true), ms); };
+      line.stop = () => fin(false); arm(Math.max(7000, line.text.length * 100));
+      const tts = () => { if (ended) return; if (!st.tts || !window.speechSynthesis || st.muted) return fin(false);
         const sp = VO_SPEAKERS[line.who] || VO_SPEAKERS.control, u = new SpeechSynthesisUtterance(line.text), v = pickVoice(sp);
         if (v) u.voice = v; u.pitch = sp.pitch; u.rate = sp.rate; u.onend = u.onerror = () => fin(true); speechSynthesis.cancel(); speechSynthesis.speak(u); };
+      if (!have.has(line.id)) return tts();   // no recording yet: the browser voice reads it
+      const a = new Audio('audio/vo/' + line.id + '.mp3'); st.audio = a;
+      a.onloadedmetadata = () => { if (isFinite(a.duration)) arm(a.duration * 1000 + 2500); };
+      a.onended = () => fin(true); a.onerror = () => { if (st.audio === a) { st.audio = null; tts(); } };
       if ((VO_SPEAKERS[line.who] || {}).radio) radioChain(a);
-      if (!have.has(line.id)) return a.onerror();   // no recording yet: go straight to the fallback voice
       a.play().catch(() => {});
     }));
   }
+  /* subtitles type out at 25 characters a second (20% slower than before); Enter shows the whole line at once */
   function type(line) {
     const sp = VO_SPEAKERS[line.who] || VO_SPEAKERS.control; let i = 0; clearInterval(st.typeT);
-    st.el.innerHTML = '<div class="who" style="color:' + sp.color + '">' + sp.label + '</div><span class="tx"></span><span class="cur" style="color:' + sp.color + '"></span>';
-    st.el.style.borderColor = sp.color + '66'; st.el.style.opacity = 1; const tx = st.el.querySelector('.tx');
-    st.typeT = setInterval(() => { i = Math.min(line.text.length, i + 2); tx.textContent = line.text.slice(0, i); if (i >= line.text.length) { clearInterval(st.typeT); const c = st.el.querySelector('.cur'); if (c) c.remove(); } }, 32);
+    st.el.innerHTML = '<div class="who" style="color:' + sp.color + '"><span>' + sp.label + '</span><span class="key">ENTER ▸</span></div><span class="tx"></span><span class="cur" style="color:' + sp.color + '"></span>';
+    st.el.style.borderColor = sp.color + '66'; st.el.style.opacity = 1; const tx = st.el.querySelector('.tx'); st.typing = true;
+    const done = () => { clearInterval(st.typeT); st.typing = false; tx.textContent = line.text; const c = st.el.querySelector('.cur'); if (c) c.remove(); };
+    st.reveal = done;
+    st.typeT = setInterval(() => { i = Math.min(line.text.length, i + 1); tx.textContent = line.text.slice(0, i); if (i >= line.text.length) done(); }, 40);
   }
   async function next() {
     if (st.cur || !st.q.length) return;
     const line = st.cur = st.q.shift(); clearTimeout(st.timer); type(line);
-    const t0 = performance.now(), minMs = Math.max(2600, line.text.length * 52), spoke = await play(line);
-    const left = Math.max(spoke ? 900 : 0, minMs - (performance.now() - t0));
-    if (st.cur !== line) return;
-    st.timer = setTimeout(() => { if (st.cur !== line) return; st.cur = null; if (!st.q.length) st.el.style.opacity = 0; line.res && line.res(); next(); }, left);
+    const t0 = performance.now(), minMs = Math.max(2800, line.text.length * 62), spoke = await play(line);
+    if (st.cur !== line) return;   // skipped meanwhile
+    st.timer = setTimeout(() => finish(line), Math.max(spoke ? 900 : 0, minMs - (performance.now() - t0)));
   }
-  /* say('a15_arrive') or say({ who:'control', text:'…' }). Returns a promise that resolves when the line has finished. */
+  function finish(line) {
+    if (st.cur !== line) return; clearTimeout(st.timer); clearInterval(st.typeT); st.typing = false; st.cur = null;
+    if (!st.q.length) st.el.style.opacity = 0; if (line.res) line.res(); next();
+  }
+  function skip() { const line = st.cur; if (!line) return; stopSound(); if (line.stop) line.stop(); finish(line); }
+  // Enter: the first press shows the whole subtitle, the second skips to the next line. It is swallowed, so it never also presses a button or triggers gameplay.
+  addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !st.cur) return; e.preventDefault(); e.stopImmediatePropagation(); if (e.repeat) return;
+    if (st.typing && st.reveal) st.reveal(); else skip();
+  }, true);
+  /* say('a15_arrive') or say({ who:'control', text:'…' }). A named line plays only once per page (no repeats) unless opt.again.
+     Returns a promise that resolves when the line has finished or been skipped. */
   function say(x, opt = {}) {
     init(); const base = typeof x === 'string' ? VO_LINES[x] : null;
     const line = base ? { id: x, who: base[0], text: base[1] } : Object.assign({ id: '_' }, x);
     if (!line.text) return Promise.resolve();
+    if (line.id !== '_') { if (st.said.has(line.id) && !opt.again) return Promise.resolve(); st.said.add(line.id); }
     if (opt.now) clear();
+    if (opt.drop) { const q = st.q; st.q = []; q.forEach(l => { if (l.res) l.res(); }); }   // let the current line finish, but drop the ones still waiting
     return new Promise(res => { line.res = res; st.q.push(line); next(); });
   }
-  function clear() { st.q.forEach(l => l.res && l.res()); st.q = []; if (st.cur && st.cur.res) st.cur.res(); st.cur = null; clearTimeout(st.timer); clearInterval(st.typeT); stopSound(); if (st.el) st.el.style.opacity = 0; }
-  return { init, say, clear, setMuted, get muted() { return st.muted; }, set tts(v) { st.tts = v; } };
+  function clear() { const all = [...st.q, st.cur].filter(Boolean); st.q = []; st.cur = null; clearTimeout(st.timer); clearInterval(st.typeT); st.typing = false; stopSound(); all.forEach(l => { if (l.stop) l.stop(); }); if (st.el) st.el.style.opacity = 0; all.forEach(l => { if (l.res) l.res(); }); }
+  // resolves when nothing is playing or queued (or after maxMs), so a page can wait before navigating away mid-sentence
+  function whenIdle(maxMs = 9000) { return new Promise(res => { const t0 = performance.now(), chk = () => (!st.cur && !st.q.length) || performance.now() - t0 > maxMs ? res() : setTimeout(chk, 150); chk(); }); }
+  function lift(on) { if (st.el) st.el.style.bottom = (on ? 12 : st.base) + 'px'; }   // drop subtitles to the very bottom while a tall card is open
+  return { init, say, clear, skip, whenIdle, lift, setMuted, get busy() { return !!st.cur || st.q.length > 0; }, get muted() { return st.muted; }, set tts(v) { st.tts = v; } };
 })();

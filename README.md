@@ -19,13 +19,13 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 
 ## Game flow
 
-`index.html` (choose Moon or Mars, then a rover) → `story.html` (rocket flight, landing, walk as an astronaut) → `repair.html` (hand-tracked repair bay) → `story.html` (driving mission, walk back, take off) → back to mission select. Completing all four unlocks the ending.
+`index.html` ("The Last Transmission": start screen, then an interactive solar-system console with Apollo 15 and 17 on the Moon and Spirit and Opportunity on Mars; each rover tells its story in short chapters) → `story.html` (rocket flight, landing, walk as an astronaut) → `repair.html` (hand-tracked repair bay) → `story.html` (driving mission, walk back, take off) → back to mission select. Completing all four returns you to the console, where the locked finale unlocks.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `index.html` | Story Mode hub: destinations, rover cards with live 3D previews, progress, ending unlock |
+| `index.html` | The Last Transmission: start screen, 3D solar-system console (drag, zoom, beacons), rover story chapters with mission data, progress, locked finale |
 | `story.html` | Rocket travel, third-person astronaut, shared driving system, four drive missions, ending |
 | `repair.html` | The hand-tracked repair bay (formerly v8). Opened with `?story=1&mission=…` it runs only that mission's repairs and returns to the story; opened on its own it is free play with all repairs |
 | `shared/models.js` | Rover 3D models, NASA mission history, and the 2075 story data, used by all three pages |
@@ -37,7 +37,9 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 
 - **Repairs:** you choose at the first repair (with "Never ask again" / "Ask again"); scroll to zoom. Webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse.
 - **Walking:** WASD, Shift to run, drag the mouse to look, E to interact.
-- **Driving:** W/S, A/D, Shift for slow and careful, E to interact.
+- **Dialogue:** Enter once shows the whole subtitle, Enter again skips to the next line. 🔊 mutes the voice.
+- **Driving:** W/S, A/D, Shift for slow and careful, E to interact. Opportunity: F fast-forwards time while parked (panels only charge in daylight).
+- **Repair bay:** right-drag, arrow keys or the ⟲ ⟳ ⤒ ⤓ buttons turn and tilt the rover; scroll to zoom.
 
 ## Running it
 

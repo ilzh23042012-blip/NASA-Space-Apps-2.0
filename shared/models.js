@@ -243,7 +243,7 @@ const MISSIONS = [
 const RECLAIM = {
   a15: { body: 'MOON', word: 'Curiosity', repairs: ['a15_steer'],
     intro: 'In 2075, Project RECLAIM lands you at Hadley–Apennine, where the first rover ever driven by astronauts has stood since 1971. On its very first drive in real history, its front steering stopped responding. Use your hands to diagnose the steering, then take the rover on one more science drive to the places that made it famous.',
-    task: 'Diagnose the steering fault, then drive to three sampling sites (any order), collect a sample at each and return to your rocket.',
+    task: 'Diagnose the steering fault, then drive to three sampling sites, collect a sample at each and return to your rocket.',
     drive: { type: 'checkpoints', vehicle: 'ride', title: 'Science drive', checkpoints: [
       { name: 'Hadley Rille (the Elbow)', fact: 'Hadley Rille is a winding channel more than a kilometre wide and hundreds of metres deep, probably carved by flowing lava. Scott and Irwin sampled its rim on their first drive.' },
       { name: 'St. George crater', fact: 'On the slope of Mount Hadley Delta the crew collected breccias: rocks shattered by impacts and welded back together, which record the Moon’s violent early history.' },

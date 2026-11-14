@@ -17,13 +17,14 @@
   #overlay p { margin:0; opacity:.9; }
   #overlay ul { margin:0; padding:0; list-style:none; opacity:.75; font-size:.92rem; }
   #overlay .note { font-size:.85rem; opacity:.65; }
-  #story { z-index:8; display:none; background:rgba(3,5,9,.5); justify-content:flex-start !important; padding-top:max(16px, 5vh) !important; }
-  #story .card { box-sizing:border-box; max-width:780px; width:100%; max-height:calc(100vh - 5vh - 230px); overflow:auto; background:rgba(6,10,18,.95); border:1px solid rgba(70,217,255,.4); border-radius:10px; padding:22px 26px; box-shadow:0 0 40px rgba(0,0,0,.6); line-height:1.55; }
+  #story { z-index:8; display:none; background:rgba(3,5,9,.5); justify-content:flex-start !important; padding-top:16px !important; }
+  #story .card { box-sizing:border-box; max-width:780px; width:100%; max-height:calc(100vh - 120px); overflow:auto; background:rgba(6,10,18,.95); border:1px solid rgba(70,217,255,.4); border-radius:10px; padding:22px 26px; box-shadow:0 0 40px rgba(0,0,0,.6); line-height:1.55; }
   #story h2 { margin:.2em 0 .1em; font-weight:500; font-size:1.6rem; }
   #story h3 { margin:1em 0 .3em; color:var(--cyan); font-size:1rem; letter-spacing:.04em; text-transform:uppercase; }
   #story p { margin:.4em 0; }
   #story .meta { opacity:.7; }
   #story .small { font-size:.85rem; opacity:.7; }
+  #story ol.steps { padding-left:1.6em; } #story ol.steps li { margin:.3em 0; padding-left:.2em; }
   #story ul, #story ol { margin:.3em 0; padding-left:1.3em; }
   #story a { color:var(--cyan); }
   #story .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
@@ -52,7 +53,7 @@
   <ul>
     <li><b>Point</b> to scan · <b>Pinch</b> to grab · <b>Open your fingers</b> to drop · <b>Twist</b> to turn screws and knobs · <b>Open palm</b> to wipe</li>
     <li>Glowing <b>cat's cradle strings</b> stretch between your fingertips: some tasks use them as tape or a tow line.</li>
-    <li>One hand holds and turns the rover, the other scans. Hold still to lock it so both hands are free.</li>
+    <li>One hand holds and turns the rover, the other scans. With the mouse, drag empty space to turn it.</li>
   </ul>
   <div class="row" style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
     <button id="start" class="hbtn">Start camera</button>
@@ -115,7 +116,7 @@ const RECIPES = {
         opts: [['Wait for the motor to fix itself', 'Motors do not heal. Since 2004 the team had already rested it and driven backwards to spread its lubricant.'],
           ['Send a robot to swap the wheel', 'No robot or person could reach Spirit. On Mars, every fix has to be done with software and driving tricks.'],
           ['Drive backwards, dragging the dead wheel', null, 'Spirit drove backwards, so its five working wheels pulled the dead one behind them.']] },
-      { t: 'wipe', short: 'Drag the dead wheel', text: 'Spirit drives backwards: rub along the soil strip behind the wheel to drag it through the ground', goal: .8, gauge: p => 'Trench dug ' + Math.round(100 * p) + '%', done: 'Bright white soil: almost pure silica!' }] },
+      { t: 'plough', short: 'Drag the dead wheel', text: 'Grab the wheel and drag it backwards and forwards through the soil', passes: 6, done: 'Bright white soil: almost pure silica!' }] },
   mer_wheel: { unitDef: () => merWheelUnit, scale: 3.5, rot: [-.18, .5, 0], pos: [-.5, 0],
     mount(add, M) {
       add(new CylG(.2, .2, .04, 24), M(0x9aa4ad, .85, .3), 0, 0, 0, PIE / 2, 0, 0);
@@ -167,6 +168,7 @@ const HINTS = {
   tape: ['With both hands up, the string between your index fingers is the tape. Stretch it over a seam, line it up and hold still', 'Press on one end of a glowing seam and drag to the other end'],
   motortest: ['Point at "Send drive command" and hold, or pinch it', 'Click "Send drive command"'],
   choice: ['Point at an answer and hold, or pinch it', 'Click an answer'],
+  plough: ['Pinch the wheel and move your hand left and right along the soil', 'Hold the mouse button on the wheel and drag it left and right along the soil'],
   traction: ['Point and hold (or pinch) a direction, pinch-drag the speed slider, then press Try drive', 'Click a direction, drag the speed slider, then click Try drive'],
   storm: ['Pinch the timeline slider and move it right. Pinch the camera button to photograph the Sun', 'Drag the timeline slider and click the camera button'],
   energy: ['Flip systems on or off at any time, and press Run storm', 'Click systems on or off, and click Run storm'],
@@ -317,23 +319,22 @@ if (STORY) addEventListener('load', () => setTimeout(() => {
 /* ================= story panels (DOM, usable by hand or mouse) ================= */
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const badge = k => '<span class="badge" style="color:' + LABEL[k][1] + '">' + LABEL[k][0] + '</span>';
-function showPanel(html) { storyEl.innerHTML = '<div class="card">' + html + '</div>'; storyEl.style.display = 'flex'; G.panel = true; const p = storyEl.querySelector('.primary'); if (p) p.focus({ preventScroll: true }); }
-function hidePanel() { storyEl.style.display = 'none'; storyEl.innerHTML = ''; G.panel = false; }
+function showPanel(html) { storyEl.innerHTML = '<div class="card">' + html + '</div>'; storyEl.style.display = 'flex'; G.panel = true; VO.lift(true); const p = storyEl.querySelector('.primary'); if (p) p.focus({ preventScroll: true }); }
+function hidePanel() { storyEl.style.display = 'none'; storyEl.innerHTML = ''; G.panel = false; VO.lift(false); }
 function showIntro() {
   const C = rover.C;
   showPanel('<span class="badge" style="color:' + C.accent + '">' + (STORY ? 'PROJECT RECLAIM · REPAIR BAY' : 'MISSION ' + (G.mission + 1) + ' · ' + C.env) + '</span>' +
     '<h2>' + esc(C.name) + '</h2><p class="meta">' + esc(C.years) + ' · ' + esc(C.where) + '</p>' +
     '<h3>Before the incident</h3><p>' + esc(C.before) + '</p><p><b>The people:</b> ' + esc(C.people) + '</p>' +
-    '<h3>Your mission</h3><p>' + esc(STORY && RECLAIM[C.id] ? RECLAIM[C.id].task : C.objective) + '</p><ol>' + rover.tasks.map(t => '<li>' + badge(t.label) + esc(t.title) + (t.optional ? ' <i>(optional)</i>' : '') + '</li>').join('') + '</ol>' +
-    '<p class="small">' + badge('H') + 'what really happened. ' + badge('R') + 'you act out a real event in simplified form. ' + badge('X') + 'a "what if" that did not happen.</p>' +
+    '<h3>Your mission</h3><p>' + esc(STORY && RECLAIM[C.id] ? RECLAIM[C.id].task : C.objective) + '</p><ol class="steps">' + rover.tasks.map(t => '<li>' + esc(t.title) + (t.optional ? ' <i>(optional)</i>' : '') + '</li>').join('') + '</ol>' +
     '<div class="row"><button class="hbtn primary" data-act="begin">Begin inspection</button>' + (STORY ? '<button class="hbtn sec" data-act="leave">Back to the astronaut</button>' : '<button class="hbtn sec" data-act="select">Choose another rover</button>') + '</div>');
 }
 function showCard(t) {
   const all = rover.tasks.filter(u => !u.optional).every(u => u.done), nextOpt = rover.tasks.find(u => u.optional && !u.done && unlocked(u));
-  showPanel(badge(t.label) + '<p class="meta">' + esc(t.when) + '</p><h2>' + esc(t.explain.title) + '</h2><p>' + esc(t.explain.text) + '</p>' +
+  showPanel('<p class="meta">' + esc(t.when) + '</p><h2>' + esc(t.explain.title) + '</h2><p>' + esc(t.explain.text) + '</p>' +
     '<h3>What happened</h3><p>' + esc(t.history) + '</p>' +
     '<details><summary class="hbtn sec">Learn more</summary><p>' + esc(t.learn) + '</p></details>' +
-    (nextOpt && !all ? '<p class="small">Optional ' + badge(nextOpt.label) + 'unlocked: ' + esc(nextOpt.title) + '. Scan the ' + esc(lname(nextOpt.p.def).toLowerCase()) + ' to try it.</p>' : '') +
+    (nextOpt && !all ? '<p class="small">Optional task unlocked: ' + esc(nextOpt.title) + '. Scan the ' + esc(lname(nextOpt.p.def).toLowerCase()) + ' to try it.</p>' : '') +
     '<div class="row"><button class="hbtn primary" data-act="' + (all ? (STORY ? 'storyDone' : 'finale') : 'cont') + '">' + (all ? (STORY ? 'Return to the astronaut and drive' : 'Finish the mission') : 'Continue') + '</button></div>');
 }
 function showConclusion() {
@@ -343,15 +344,14 @@ function showConclusion() {
   showPanel('<span class="badge" style="color:' + C.accent + '">MISSION COMPLETE</span><h2>' + esc(C.name) + '</h2>' +
     '<h3>After the incident</h3><p>' + esc(C.after) + '</p>' +
     '<h3>Remember</h3><ul>' + C.facts.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul>' +
-    '<h3>What you did</h3><ul>' + done.map(t => '<li>' + badge(t.label) + esc(t.title) + '</li>').join('') + '</ul>' +
-    (hyp ? '<p class="small">Tasks marked ' + badge('X') + 'were simulations of things that never happened.</p>' : '') +
+    '<h3>What you did</h3><ul>' + done.map(t => '<li>' + esc(t.title) + (t.label === 'X' ? ' <i>(a “what if”, not real history)</i>' : '') + '</li>').join('') + '</ul>' +
     '<p class="meta">Time ' + Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s · mistakes ' + G.mistakes + ' · hints ' + G.hints + '</p>' +
     '<h3>Sources and credits</h3><ul>' + C.sources.map(([t, u]) => '<li><a href="' + u + '" target="_blank" rel="noopener">' + esc(t) + '</a></li>').join('') + '</ul>' +
     '<p class="small">Historical information from NASA. 3D models are simplified illustrations, not to scale. Real NASA photographs are linked above rather than embedded.</p>' +
     '<div class="row"><button class="hbtn primary" data-act="select">Choose another rover</button><button class="hbtn sec" data-act="replay">Replay this mission</button></div>');
 }
 function learnMoreBay() {
-  const t = B.task; showPanel(badge(t.label) + '<h2>' + esc(t.title) + '</h2><p class="meta">' + esc(t.when) + '</p><p>' + esc(t.history) + '</p><p>' + esc(t.learn) + '</p>' +
+  const t = B.task; showPanel('<h2>' + esc(t.title) + '</h2><p class="meta">' + esc(t.when) + '</p><p>' + esc(t.history) + '</p><p>' + esc(t.learn) + '</p>' +
     '<div class="row"><button class="hbtn primary" data-act="close">Back to the task</button></div>');
 }
 const ACT = {
@@ -363,8 +363,8 @@ const ACT = {
   close() { hidePanel(); },
   back() { exitBench(false); },
   hint() { hint(); },
+  rotL() { turnView(-.35, 0); }, rotR() { turnView(.35, 0); }, tiltU() { turnView(0, -.25); }, tiltD() { turnView(0, .25); }, view0() { if (B) B.view = { yaw: 0, pitch: 0 }; },
   learn() { if (B) learnMoreBay(); },
-  lock() { setLock(!G.locked); },
   storyDone() { hidePanel(); setProgress(STORY_ID + '_repair'); G.black = 1; toStory('drive'); },
   leave() { hidePanel(); toStory('rover'); },
   // Opportunity: retry the power plan, or give up and learn why the real rover could not be saved
@@ -381,8 +381,8 @@ const ACT = {
 document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && !el.disabled && ACT[el.dataset.act]) { if (!ac) try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (er) {} ACT[el.dataset.act](el); } });
 function setBar() {
   const btn = (act, label) => '<button class="hbtn" data-act="' + act + '">' + label + '</button>';
-  if (G.mode === 'bench') barEl.innerHTML = btn('back', '← Back') + btn('hint', 'Hint') + btn('learn', 'Learn more');
-  else if (G.mode === 'main') barEl.innerHTML = (STORY ? btn('leave', '← Astronaut') : btn('select', 'Missions')) + btn('lock', G.locked ? '🔒 Locked' : '🔓 Free') + btn('hint', 'Hint');
+  if (G.mode === 'bench') barEl.innerHTML = btn('back', '← Back') + btn('rotL', '⟲') + btn('rotR', '⟳') + btn('tiltU', '⤒') + btn('tiltD', '⤓') + btn('view0', 'Reset view') + btn('hint', 'Hint') + btn('learn', 'Learn more');
+  else if (G.mode === 'main') barEl.innerHTML = (STORY ? btn('leave', '← Astronaut') : btn('select', 'Missions')) + btn('hint', 'Hint');
   else barEl.innerHTML = '';
   barEl.style.display = barEl.innerHTML ? 'flex' : 'none';
 }
@@ -399,22 +399,24 @@ addEventListener('keydown', e => {
   if (G.mode === 'select') { const i = '1234'.indexOf(k); if (i >= 0) chooseMission(i); return; }
   if (k === 's') { G.muted = !G.muted; toast('Sound ' + (G.muted ? 'off' : 'on')); return; }
   if (k === 'f') { hint(); return; }
-  if (G.mode === 'bench') { if (k === 'escape' || k === 'b') exitBench(false); else if (k === 'i') learnMoreBay(); return; }
+  if (G.mode === 'bench') { if (k === 'escape' || k === 'b') exitBench(false); else if (k === 'i') learnMoreBay(); else if (k === 'arrowleft') turnView(-.2, 0); else if (k === 'arrowright') turnView(.2, 0); else if (k === 'arrowup') turnView(0, -.15); else if (k === 'arrowdown') turnView(0, .15); return; }
   if (Z.ph) return;
   if (k === 'r' && !STORY) chooseMission(G.mission);
   else if (k === 'm' || k === 'escape') { if (STORY) ACT.leave(); else toSelect(); }
   else if (k === 't') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); }
   else if (k === 'e') { G.lock = !G.lock; toast('Exploded view ' + (G.lock ? 'locked open' : 'follows your hand')); }
   else if (k === 'h') { G.swap = !G.swap; toast(G.swap ? 'Holding with right-on-screen hand' : 'Holding with left-on-screen hand'); }
-  else if (k === 'l') setLock(!G.locked); else if (k === 'a') { G.auto = !G.auto; toast('Auto-lock ' + (G.auto ? 'on' : 'off')); }
   else if (k === 'q' && hands) { G.quality = 1 - G.quality; hands.setOptions({ modelComplexity: G.quality }); toast(G.quality ? 'Tracking: accurate (slower)' : 'Tracking: fast'); }
 });
 /* mouse: a fallback pointer, and the whole input when there is no camera */
 addEventListener('pointermove', e => {
   if (!started) return; const dx = e.clientX - MS.x, dy = e.clientY - MS.y; MS.x = e.clientX; MS.y = e.clientY; MS.t = performance.now();
+  if (MS.view && G.mode === 'bench') { turnView((e.clientX - MS.view.x) * .008, (e.clientY - MS.view.y) * .006); MS.view = { x: e.clientX, y: e.clientY }; return; }
   if (MS.down && MS.rot && G.mode === 'main' && !Z.ph && rover && !G.locked) { rover.yaw += dx * .01; G.mpitch = clamp(G.mpitch + dy * .006, -.9, 1.1); }
 });
+addEventListener('contextmenu', e => { if (started && G.mode === 'bench') e.preventDefault(); });
 addEventListener('pointerdown', e => {
+  if (started && e.button === 2 && G.mode === 'bench' && !G.panel) { MS.view = { x: e.clientX, y: e.clientY }; return; }
   if (!started || e.button !== 0 || (e.target && e.target.closest && e.target.closest('#story, #bar, #overlay'))) return; const now = performance.now();
   MS.x = e.clientX; MS.y = e.clientY; MS.down = true; MS.t = now; MS.rot = false; TS[2].riseT = now;
   if (G.panel) return;
@@ -423,7 +425,7 @@ addEventListener('pointerdown', e => {
   const m = pickMesh(MS.x, MS.y, innerWidth, innerHeight, liveParts(), 6);
   if (m && !rover.testT) { const p = m.userData.part; scanPart(p); const t = availableTask(p); if (t) enterBench(p, t); } else MS.rot = true;
 });
-addEventListener('pointerup', () => { MS.down = false; MS.rot = false; });
+addEventListener('pointerup', () => { MS.down = false; MS.rot = false; MS.view = null; });
 const mouseLive = now => G.mouseOnly || now - MS.t < 4000 || MS.down;
 /* hands press DOM buttons: point and hold, or pinch */
 function domHands(ctx, hv, now, dt, allow) {
@@ -611,6 +613,8 @@ function selectScreen(ctx, w, h, now, dt, hv) {
 }
 
 /* ---- pose: the holding hand carries the rover ---- */
+/* inspection view in the repair bay: an extra yaw/pitch on top of the recipe's own angle. It never touches the parts being repaired. */
+function turnView(dy, dp) { if (!B) return; const v = B.view || (B.view = { yaw: 0, pitch: 0 }); v.yaw = clamp(v.yaw + dy, -1.6, 1.6); v.pitch = clamp(v.pitch + dp, -.7, .7); }
 function setLock(v) {
   if (G.locked === v) return; G.locked = v; G.still = 0; G.travel = 0; G.armed = false; G.sig = null;
   toast(v ? 'Locked: scan it with both hands' : 'Unlocked: hold it with one hand'); arp(v ? [660, 880] : [880, 660]); setBar();
@@ -627,7 +631,7 @@ function updatePose(dt, w, h, hi, hv) {
       ex = G.lock ? 1 : clamp((k.spread - 1.25) / .5, 0, 1);
       const sig = [c.x / k.sz, c.y / k.sz, roll * 2, pitch * 2, yt * 2, ex * 2];
       if (G.sig) { const d = Math.hypot(...sig.map((v, i) => v - G.sig[i])); G.travel += d; G.still = d < .04 ? G.still + dt : 0; if (G.travel > 1.5) G.armed = true; }
-      G.sig = sig; if (G.auto && G.armed && G.still > .8) setLock(true);
+      G.sig = sig;
     } else {
       G.sig = null; G.still = 0;
       if (performance.now() - MS.t > 3000 && !TS[2].hover) rover.yaw += dt * .4;
@@ -667,7 +671,7 @@ function scanPart(p) {
   const t = availableTask(p), pend = pendingTask(p), cur = currentTask();
   if (!p.scanned) beep(t ? 200 : 880, .08, t ? 'square' : 'sine');
   p.scanned = true;
-  if (t) toast((t.optional ? 'Optional ' : '') + LABEL[t.label][0].toLowerCase() + ': ' + t.title);
+  if (t) toast((t.optional ? 'Optional task: ' : 'Task: ') + t.title);
   else if (pend && cur) toast(lname(p.def) + ': later. First: ' + cur.title);
   else toast(lname(p.def) + ': ' + p.def.info);
 }
@@ -1273,6 +1277,31 @@ const STEP = {
       } else st.cur *= .92;
       return st.n >= 2 && st.run <= 0;
     } },
+  plough: { short: 'Drag the wheel',   // the dead wheel cannot turn, so it slides and ploughs a trench; each sweep scrapes away more of the top soil
+    begin(b, st) { st.sw = 0; st.dir = 0; st.x = 0; st.ext = 0; st.grab = null; b.unit.g.position.x = 0; if (b.dust[0]) b.holder.attach(b.dust[0].m); },   // the soil cover stays put while the wheel slides over it
+    update(b, st, ptrs, dt, now, w, h) {
+      const u = b.unit, o = b.dust[0], L = { min: -1.25, max: 0 }, c = hproj(b, st.x, 0, 0); st.c = c;
+      let q = ptrs.find(p => p.S === st.grab);
+      if (q && (!q.pinch || q.lost)) { st.grab = null; q = null; }
+      if (!st.grab) { for (const p of ptrs) if (fresh(p, now) && Math.hypot(p.px - c.x, p.py - c.y) < b.S * 70 * .5 + 40) { st.grab = p.S; q = p; beep(420, .05); break; } }
+      if (q) {   // follow the pointer along the trench, in the holder's own frame
+        const wp = planePoint(q.px, q.py, b.holder.getWorldPosition(tmpV).z, w, h), lp = b.holder.worldToLocal(wp.clone());
+        const nx = clamp(lp.x, L.min, L.max), d = nx - st.x; st.x = nx;
+        if (Math.abs(d) > 1e-4) { const dir = Math.sign(d), count = () => { st.sw++; beep(240 + st.sw * 40, .08, 'sawtooth', .04); };
+          // a sweep counts when the wheel has slid most of the trench one way, or at least a third of it before turning back
+          if (dir !== st.dir) { if (st.ext > .45) count(); st.ext = 0; st.dir = dir; }
+          st.ext += Math.abs(d); if (st.ext >= .95) { count(); st.ext = -99; }
+          // scrape the soil cover where the wheel slid
+          const W = o.cv.width, Hh = o.cv.height, ux = x => (x + 1.4) / 1.2 * W, a = { x: ux(st.x - d), y: Hh / 2 }, bb = { x: ux(st.x), y: Hh / 2 };
+          wipeStroke(o, a, bb, Hh * .42, .22 + .08 * st.sw);
+          const sp = hproj(b, st.x - .3 * dir, -.33, 0); emitDust(b, sp.x, sp.y, 2, -dir * 80, -dir * 160, -90, -30, '199,154,99'); }
+      }
+      u.g.position.x += (st.x - u.g.position.x) * .5;
+      // after each full sweep the remaining cover thins out, so 3 back-and-forth movements always finish it
+      const need = st.passes || 6; o.m.material.opacity = Math.max(0, 1 - st.sw / need * .85); st.p = Math.min(1, st.sw / need);
+      if (st.sw >= need) { o.m.visible = false; st.grab = null; toast(st.done); return true; }
+      return false;
+    } },
   choice: { short: 'Decide',   // multiple choice: wrong answers explain why they would not work
     begin(b, st) { st.wrong = new Set(); },
     update(b, st, ptrs, dt, now, w, h) {
@@ -1371,6 +1400,9 @@ function placeItem(b, st, it, t) { t.filled = true; it.placed = true; tweenTo(b,
 function sendHome(b, it) { tweenTo(b, it.g, it.home.parent, it.home.p.clone(), it.home.rz, it.home.s); }
 
 function updateBench(dt, now, w, h, hv) {
+  const vw = B.view || { yaw: 0, pitch: 0 }, R0 = B.R.rot; B.vs = B.vs || { yaw: 0, pitch: 0 };
+  B.vs.yaw += (vw.yaw - B.vs.yaw) * Math.min(1, dt * 10); B.vs.pitch += (vw.pitch - B.vs.pitch) * Math.min(1, dt * 10);
+  B.holder.rotation.set(R0[0] + B.vs.pitch, R0[1] + B.vs.yaw, R0[2]);
   bscene.updateMatrixWorld(true);
   const ptrs = benchPointers(hv, now, dt);
   B.tw = B.tw.filter(f => !f(dt));
@@ -1626,6 +1658,13 @@ const STEP_DRAW = {
     FONT(ctx, 12, 600); ctx.fillStyle = st.n ? '#ff8a7a' : 'rgba(219,234,242,.7)'; ctx.fillText(st.n ? 'Power in, no movement out: the motor is stalled' : 'Commands sent: 0', x + 150, y + 128);
     drawBtn(ctx, st.btn, st.run > 0 ? 'Commanding motor…' : '▶ Send drive command (' + st.n + '/2)', { primary: true, disabled: st.run > 0 });
   },
+  plough(b, st, ctx, now, w, h) {
+    const c = st.c; if (!c) return; const r = b.S * 70 * .45 + 16, a = hproj(b, -1.25, -.33, 0), z = hproj(b, 0, -.33, 0);
+    dashRing(ctx, c.x, c.y, r, st.grab ? '#5dff9e' : 'rgba(255,176,0,.8)', !st.grab);
+    ctx.strokeStyle = 'rgba(255,176,0,.75)'; ctx.lineWidth = 3; for (const [p, s] of [[a, -1], [z, 1]]) { ctx.beginPath(); ctx.moveTo(p.x, p.y + 30); ctx.lineTo(p.x - s * 14, p.y + 22); ctx.lineTo(p.x - s * 14, p.y + 38); ctx.closePath(); ctx.stroke(); }
+    ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(a.x, a.y + 30); ctx.lineTo(z.x, z.y + 30); ctx.stroke(); ctx.setLineDash([]);
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; ctx.fillText('DRAG THE WHEEL ◀ ▶', (a.x + z.x) / 2, a.y + 58);
+  },
   choice(b, st, ctx, now, w, h) {
     const L = choiceLayout(st, w, h); panel(ctx, L.x, L.y, L.w, L.h);
     ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('MISSION TEAM DECISION · March 2006', L.x + 16, L.y + 24);
@@ -1687,7 +1726,7 @@ const STEP_DRAW = {
       r.log.forEach((s, i) => { if (i <= K && s.temp < -40) { ctx.fillStyle = '#46d9ff'; ctx.beginPath(); ctx.arc(X(i), base - 6, 4, 0, PIE * 2); ctx.fill(); } });
       const cur = r.log[Math.min(n - 1, Math.floor(K))]; ctx.textAlign = 'left'; FONT(ctx, 12, 600); ctx.fillStyle = '#dbeaf2';
       ctx.textAlign = 'right'; ctx.fillText('Sol ' + (cur.sol + 1) + ' · tau ' + cur.tau.toFixed(1) + ' · battery ' + Math.round(cur.batt) + '%', Gr.x + Gr.w - 12, Gr.y + 20);
-    } else { ctx.textAlign = 'center'; FONT(ctx, 13); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText('Choose your systems, then press Run the storm', Gr.x + Gr.w / 2, top + gh / 2); }
+    }
     ctx.textAlign = 'left'; FONT(ctx, 12); const legend = [['#ffd24a', 'Solar energy collected each sol (Mars day)'], ['#5dff9e', 'Battery charge'], ['#46d9ff', 'Nights below −40 °C (can damage the battery)']];
     legend.forEach(([c, t], i) => { ctx.fillStyle = c; ctx.fillRect(Gr.x, Gr.y + Gr.h + 14 + i * 20, 10, 10); ctx.fillStyle = 'rgba(219,234,242,.8)'; ctx.fillText(wrapLines(ctx, t, Gr.w - 20)[0], Gr.x + 16, Gr.y + Gr.h + 23 + i * 20); });
     if (!st.run) drawBtn(ctx, L.run, '▶ Run the storm', { primary: true });
@@ -1727,6 +1766,7 @@ function drawBolts(b, ctx, now, dir) {
 function stepCount(b, st) {
   if (st.t === 'unbolt' || st.t === 'bolt') return '  (' + b.bolts.filter(x => x.done).length + '/' + b.bolts.length + ')';
   if (st.t === 'wipe') return '  (' + Math.round(100 * clamp((st.p || 0) / st.goal, 0, 1)) + '%)';
+  if (st.t === 'plough') return '  (' + Math.min(3, Math.floor((st.sw || 0) / 2)) + '/3)';
   if (st.t === 'handle') return '  (' + Math.min(st.n || 0, st.need || 4) + '/' + (st.need || 4) + ')';
   if (st.t === 'samples' && st.rocks) return '  (' + st.rocks.filter(r => r.done).length + '/' + st.rocks.length + ')';
   if (st.t === 'tape' && st.seams) return '  (' + st.seams.filter(s => s.done).length + '/' + st.seams.length + ')';
@@ -1744,7 +1784,7 @@ function benchHud(ctx, w, h, now) {
   const wide = w >= 900, pw = wide ? 360 : w - 32; FONT(ctx, 12);
   const hist = wide ? wrapLines(ctx, t.when + ': ' + t.history, pw - 24).slice(0, 6) : [], n = B.steps.length;
   const ph = wide ? 100 + hist.length * 16 + n * 22 : 62; panel(ctx, 16, 16, pw, ph);
-  ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = LABEL[t.label][1]; ctx.fillText(LABEL[t.label][0] + '  ·  ' + rover.C.short.toUpperCase(), 28, 34);
+  ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText(rover.C.short.toUpperCase() + '  ·  ' + t.when.toUpperCase(), 28, 34);
   FONT(ctx, 15, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, 28, 54);
   if (wide) {
     FONT(ctx, 12); ctx.fillStyle = B.done ? '#5dff9e' : '#ff8a7a'; ctx.fillText(B.done ? 'Done' : t.text, 28, 73);
@@ -1753,7 +1793,7 @@ function benchHud(ctx, w, h, now) {
     B.steps.forEach((s, i) => { const cur = i === B.si; FONT(ctx, 13, cur ? 600 : 400); ctx.fillStyle = s.done ? '#5dff9e' : cur ? '#ffffff' : 'rgba(219,234,242,.45)'; ctx.fillText((s.done ? '✓ ' : cur ? '▶ ' : (i + 1) + '. ') + (s.short || STEP[s.t].short) + (cur ? stepCount(B, s) : ''), 28, y0 + i * 22); });
   }
   const secs = Math.floor((now - rover.t0) / 1000);
-  ctx.textAlign = 'center'; FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText(rover.C.short + '  ·  ' + String(secs / 60 | 0).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0') + '  ·  mistakes ' + G.mistakes, w / 2, 28);
+  ctx.textAlign = 'center'; void secs;   // (the timer line moved out of the way of the view buttons)
   if (G.toast && now - G.toastT < 4500) {   // messages sit in the left column under the task panel, so they never cover the task's own text
     FONT(ctx, 14); const lines = wrapLines(ctx, G.toast, pw - 24), ty = 16 + ph + 10; panel(ctx, 16, ty, pw, 16 + lines.length * 19);
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffb000'; lines.forEach((ln, i) => ctx.fillText(ln, 28, ty + 22 + i * 19)); ctx.textAlign = 'center'; }
@@ -1761,7 +1801,7 @@ function benchHud(ctx, w, h, now) {
     FONT(ctx, 18, 600); ctx.fillStyle = '#fff'; ctx.fillText(st.text, w / 2, h - 52);
     FONT(ctx, 13); ctx.fillStyle = now - G.hintT < 5000 ? '#ffb000' : 'rgba(219,234,242,.75)'; ctx.fillText(HINTS[st.t] ? HINTS[st.t][G.mouseOnly ? 1 : 0] : '', w / 2, h - 28);
   }
-  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Scroll to zoom · Esc back · F hint · I learn more · S sound', w - 16, h - 8); ctx.textAlign = 'center';
+  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Right-drag or arrow keys: turn and tilt · Scroll: zoom · Esc back · F hint · S sound', w - 16, h - 8); ctx.textAlign = 'center';
   if (B.done) { const bx = w / 2 - 220, by = h / 2 - 50; panel(ctx, bx, by, 440, 100); FONT(ctx, 22, 600); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓ Task complete', w / 2, by + 42); FONT(ctx, 14); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, w / 2, by + 72); }
 }
 function hud(ctx, w, h, n, now) {
@@ -1771,9 +1811,8 @@ function hud(ctx, w, h, n, now) {
   panel(ctx, 16, 16, 340, 60 + ts.length * 22);
   F(14, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(rover.C.short + '   ' + String(secs / 60 | 0).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0'), 28, 38);
   ts.forEach((t, i) => { const open = unlocked(t); F(12, t === cur ? 700 : 400); ctx.fillStyle = t.done ? '#5dff9e' : t === cur ? '#fff' : open ? '#ffb000' : 'rgba(219,234,242,.4)';
-    ctx.fillText((t.done ? '✓ ' : t === cur ? '▶ ' : '• ') + t.title + (t.optional ? ' (optional)' : ''), 42, 62 + i * 22); ctx.fillStyle = LABEL[t.label][1]; ctx.fillRect(28, 54 + i * 22, 8, 8); });
+    ctx.fillText((t.done ? '✓ ' : t === cur ? '▶ ' : (i + 1) + '. ') + t.title + (t.optional ? ' (optional)' : ''), 28, 62 + i * 22); });
   F(11); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText(rover.C.where + ' · mistakes ' + G.mistakes + (G.thermal ? ' · thermal' : '') + (G.muted ? ' · muted' : ''), 28, 66 + ts.length * 22);
-  if (!G.locked && G.armed && G.still > .05) { ctx.fillStyle = 'rgba(255,176,0,.85)'; ctx.fillRect(w - 300, 66, 280 * Math.min(1, G.still / .8), 3); }
   if (!Z.ph && !G.panel) for (const S of TS) {
     const q = S.hoverQ, hov = S.hover; if (!q || !hov) continue;
     const t = availableTask(hov), pend = pendingTask(hov); F(13, 600);
@@ -1795,7 +1834,7 @@ function hud(ctx, w, h, n, now) {
   else guide = 'Point at the glowing part to start the next task. Point at anything else to learn about it';
   F(16, 600); ctx.fillStyle = '#fff'; ctx.fillText(guide, w / 2, h - 40);
   if (now - G.toastT < 4500 && !G.panel) { F(14); ctx.fillStyle = '#ffb000'; wrapLines(ctx, G.toast, Math.min(700, w - 400)).forEach((ln, i) => ctx.fillText(ln, w / 2, 34 + i * 18)); }
-  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('Scroll zoom · M missions · L lock · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
+  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('Scroll zoom · M missions · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
 }
 </script>
 </body>

@@ -37,8 +37,8 @@
   .btn.sec { background:rgba(4,9,16,.8); border-color:rgba(70,217,255,.5); }
   .btn.sec:hover { background:rgba(70,217,255,.2); }
   .btn:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
-  #card { position:fixed; inset:0; z-index:8; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(2,4,8,.45); }
-  #card .box { width:min(680px, 100%); max-height:calc(100vh - 40px); overflow:auto; background:rgba(4,9,16,.95); border:1px solid var(--line); border-radius:10px; padding:22px 26px; line-height:1.55; box-shadow:0 0 50px rgba(0,0,0,.7); }
+  #card { position:fixed; inset:0; z-index:8; display:none; align-items:flex-start; justify-content:center; padding:max(16px, 5vh) 20px 20px; background:rgba(2,4,8,.45); }
+  #card .box { box-sizing:border-box; width:min(680px, 100%); max-height:calc(100vh - 5vh - 262px); min-height:0; overflow:auto; background:rgba(4,9,16,.95); border:1px solid var(--line); border-radius:10px; padding:22px 26px; line-height:1.55; box-shadow:0 0 50px rgba(0,0,0,.7); }
   #card .kick { font:700 .72rem "Space Mono", monospace; letter-spacing:.14em; }
   #card h2 { font:400 1.35rem "Michroma", sans-serif; margin:8px 0 10px; }
   #card h3 { font:700 .78rem "Space Mono", monospace; letter-spacing:.12em; color:var(--cyan); margin:16px 0 4px; }
@@ -59,6 +59,15 @@
   #endtext h1 { font:400 clamp(1.6rem, 4.6vw, 3rem) "Michroma", sans-serif; letter-spacing:.06em; margin:0 0 12px; }
   #endtext .quote { font-size:1.2rem; color:var(--amber); }
   #endtext .row { pointer-events:auto; display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:22px; }
+  .rocks { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:12px; }
+  .rock { display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 8px; min-height:44px; background:rgba(255,255,255,.04); border:1px solid rgba(70,217,255,.35); border-radius:8px; color:var(--ink); font:500 .82rem "Chakra Petch", sans-serif; cursor:pointer; transition:transform .25s, opacity .4s, background .2s; }
+  .rock:hover, .rock:focus-visible { background:rgba(70,217,255,.14); outline:none; border-color:var(--amber); }
+  .rock canvas { width:100%; max-width:132px; height:auto; }
+  .rock .lens { min-height:2.6em; opacity:.85; text-align:center; }
+  .rock.no { animation:shake .4s; border-color:var(--red); } .rock.bag { transform:scale(.6) translateY(30px); opacity:.35; border-color:var(--green); }
+  @keyframes shake { 25% { transform:translateX(-6px); } 75% { transform:translateX(6px); } }
+  @media (max-width:520px) { .rocks { grid-template-columns:1fr; } }
+  #mini { display:block; margin:10px auto; max-width:100%; }
   .fadein { animation:fi 1s ease both; } @keyframes fi { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
   @media (max-width:700px) { #keys { display:none; } #fact { bottom:120px; } }
 </style>
@@ -79,6 +88,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="shared/models.js"></script>
+<script src="shared/voice.js"></script>
 <script>
 /* ================= setup ================= */
 const QS = new URLSearchParams(location.search), MID = QS.get('mission'), ENDING = QS.get('ending') === '1', PHASE0 = QS.get('phase') || 'travel';
@@ -113,8 +123,9 @@ const arp = n => n.forEach((f, i) => beep(f, .16, 'triangle', .07, i * .1));
 /* ================= UI helpers ================= */
 let toastT = 0;
 function toast(t, ms = 4000) { $('toast').textContent = t; $('toast').style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => $('toast').style.opacity = 0, ms); }
-let factT = 0;
-function fact(title, text, kick = 'REAL NASA HISTORY', ms = 11000) { $('fKick').textContent = kick; $('fTitle').textContent = title; $('fText').textContent = text; $('fact').style.display = 'block'; clearTimeout(factT); factT = setTimeout(() => $('fact').style.display = 'none', ms); beep(880, .08); beep(1320, .1, 'sine', .05, .08); }
+/* facts and guidance are spoken, with typed subtitles that fade away (shared/voice.js) */
+VO.init({ bottom: 140, mute: { left: '14px', bottom: '14px' } });
+function say(id, opt) { beep(880, .06); beep(1320, .08, 'sine', .04, .07); return VO.say(id, opt); }
 function showCard(html, buttons) {
   $('cardBox').innerHTML = html + '<div class="row">' + buttons.map((b, i) => '<button class="btn' + (b.sec ? ' sec' : '') + '" data-i="' + i + '" type="button">' + esc(b.label) + '</button>').join('') + '</div>';
   $('card').style.display = 'flex'; S.card = true;
@@ -200,16 +211,20 @@ function makeAstronaut(suitColor = 0xf2f2ec, accent = 0xff7a2f) {
     const glove = new THREE.Mesh(new THREE.SphereGeometry(.1, 12, 10), dark); glove.position.y = -.64; a.add(glove); return a;
   });
   const legs = [-1, 1].map(s => {
-    const l = new THREE.Group(); l.position.set(s * .13, 0, 0); hips.add(l);
-    const leg = limb(.115, .1, .8, suit); leg.position.y = -.42; l.add(leg);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(.21, .15, .32), dark); boot.position.set(0, -.88, .05); l.add(boot); return l;
+    const l = new THREE.Group(); l.position.set(s * .13, 0, 0); hips.add(l);   // thigh, then a knee joint carrying the shin and boot
+    const thigh = limb(.115, .108, .46, suit); thigh.position.y = -.22; l.add(thigh);
+    const knee = new THREE.Group(); knee.position.y = -.44; l.add(knee); l.userData.knee = knee;
+    const shin = limb(.108, .1, .42, suit); shin.position.y = -.2; knee.add(shin);
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(.21, .15, .32), dark); boot.position.set(0, -.44, .05); knee.add(boot); return l;
   });
   const tablet = new THREE.Mesh(new THREE.BoxGeometry(.26, .18, .03), std(0x1c2230, .4, .3, 0x0a3346)); tablet.position.set(0, -.62, .14); tablet.rotation.x = -.6; tablet.visible = false; arms[1].add(tablet);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   return { g, hips, arms, legs, tablet, phase: 0 };
 }
 function poseAstronaut(a, mode, dt, speed) {
-  const low = WORLD.env === 'MOON';
+  const low = WORLD.env === 'MOON', knees = (k0, k1) => { a.legs[0].userData.knee.rotation.x = k0; a.legs[1].userData.knee.rotation.x = k1; };
+  if (mode === 'walk') knees(Math.max(0, Math.sin(a.phase + 1.2)) * .45, Math.max(0, -Math.sin(a.phase + 1.2)) * .45);
+  else if (mode === 'sit') knees(1.4, 1.4); else if (mode === 'crouch') knees(1.1, 1.1); else if (mode !== 'kneel') knees(a.legs[0].userData.knee.rotation.x * .85, a.legs[1].userData.knee.rotation.x * .85);
   if (mode === 'walk') {
     a.phase += dt * (low ? 5.5 : 7.5) * clamp(speed / 2.4, .6, 1.8);
     const s = Math.sin(a.phase), amp = low ? .5 : .62;
@@ -220,6 +235,12 @@ function poseAstronaut(a, mode, dt, speed) {
     a.legs.forEach(l => l.rotation.x += (-.9 - l.rotation.x) * .15); a.arms.forEach(r => r.rotation.x += (-1.1 - r.rotation.x) * .15);
   } else if (mode === 'sit') {
     a.hips.position.y = .95; a.hips.rotation.x = -.1; a.legs.forEach(l => l.rotation.x = -1.45); a.arms.forEach(r => r.rotation.x = -.9);
+  } else if (mode === 'kneel') {   // one knee down, leaning in and working with both hands
+    a.phase += dt; const w = Math.sin(a.phase * 3);
+    a.hips.position.y = .52; a.hips.rotation.x = .3; a.legs[0].rotation.x = -1.7; a.legs[1].rotation.x = -.3; knees(1.4, 1.5);
+    a.arms[0].rotation.x = -1.25 + w * .12; a.arms[1].rotation.x = -1.1 - w * .12; a.arms[0].rotation.z = .12; a.arms[1].rotation.z = -.12;
+  } else if (mode === 'carry') {   // walking with a box held in front
+    poseAstronaut(a, 'walk', dt, speed); a.arms.forEach(r => { r.rotation.x = -1.05; });
   } else if (mode === 'remote') {
     a.legs.forEach(l => l.rotation.x *= .85); a.arms[1].rotation.x += (-1.0 - a.arms[1].rotation.x) * .15; a.arms[0].rotation.x += (-.8 - a.arms[0].rotation.x) * .15; a.hips.rotation.x *= .85; a.hips.position.y += (.95 - a.hips.position.y) * .2;
   } else {   // idle: breathing
@@ -261,7 +282,7 @@ const WORLDS = {
     craters: [[40, -20, 7, 1.6], [-30, -90, 9, 2.2], [70, -60, 8, 2]],
     plateau: { x: -52, z: -36, r: 26, h: 2.6 }, hills: [[40, -112, 30, 6], [-140, -120, 70, 26], [150, 40, 80, 30]],
     soft: [[6, -32, 11], [16, -48, 9], [2, -60, 8], [26, -66, 8]],
-    labels: [[-52, -36, 'HOME PLATE'], [6, -40, 'TROY (SOFT SOIL)'], [40, -100, 'SUNNY SLOPE']],
+    labels: [[-52, -36, 'HOME PLATE'], [6, -40, 'TROY (SOFT SOIL)'], [40, -100, 'NORTH-FACING SLOPE']],
     goal: [38, -96] },
   opportunity: { env: 'MARS', seed: 19, amp: 1.5, rover: [6, -28], roverYaw: 1.7,
     craters: [[34, -40, 6, 1.6], [-30, -40, 7, 1.8]],
@@ -363,7 +384,7 @@ function buildDrivable(part) {
   const wheels = C.parts.filter(d => d.kind === 'wheel').map(d => {
     const steer = new THREE.Group(); steer.position.copy(d.home); part.g.add(steer); const spin = new THREE.Group(); steer.add(spin); part.g.updateMatrixWorld(true);
     part.g.children.filter(m => m.isMesh && m.userData.pid === d.id).forEach(m => spin.attach(m));
-    return { steer, spin, front: d.home.x > .3, rear: d.home.x < -.3, r: WORLD.env === 'MOON' ? .4 : .33 };
+    return { id: d.id, steer, spin, front: d.home.x > .3, rear: d.home.x < -.3, r: WORLD.env === 'MOON' ? .4 : .33, home: d.home };
   });
   part.g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return { root, part, wheels, x: 0, z: 0, h: 0, v: 0, steer: 0, r: WORLD.env === 'MOON' ? 2 : 1.25 };
@@ -445,7 +466,8 @@ function travel(from, to, onDone, label) {
   const BODY = { earth: { r: 10, p: new THREE.Vector3(0, 0, 0) }, moon: { r: 3.2, p: new THREE.Vector3(46, 8, -34) }, mars: { r: 6, p: new THREE.Vector3(120, 20, -90) } };
   for (const k of new Set([from, to, 'earth'])) { const b = BODY[k], m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 32), new THREE.MeshStandardMaterial({ map: bodyTexture(k, k.length * 7), roughness: 1 })); m.position.copy(b.p); sc.add(m); b.mesh = m; }
   const A = BODY[from], Bb = BODY[to], dir = Bb.p.clone().sub(A.p).normalize(), up = new THREE.Vector3(0, 1, 0);
-  const p0 = A.p.clone().addScaledVector(dir, A.r + .4), p3 = Bb.p.clone().addScaledVector(dir, -(Bb.r + .4));
+  // stop well short of the destination (about one planet-width away) so the rocket never looks like it hits it
+  const p0 = A.p.clone().addScaledVector(dir, A.r + .4), p3 = Bb.p.clone().addScaledVector(dir, -(Bb.r * 2.6 + 2));
   const side = new THREE.Vector3().crossVectors(dir, up).normalize(), mid = p0.distanceTo(p3);
   const p1 = p0.clone().addScaledVector(dir, mid * .3).addScaledVector(up, mid * .18).addScaledVector(side, mid * .1), p2 = p3.clone().addScaledVector(dir, -mid * .3).addScaledVector(up, mid * .12);
   const curve = new THREE.CubicBezierCurve3(p0, p1, p2, p3), r = makeRocket(); r.scale.setScalar(.09); sc.add(r); r.userData.flame.visible = true;
@@ -479,10 +501,11 @@ function arriveSurface(landing) {
   };
 }
 function showIntro() {
+  // short card; Mission Control tells the story out loud while the player walks
   showCard('<span class="tag fic">FICTIONAL 2075 EXPEDITION</span><span class="tag real">REAL HISTORY: ' + esc(C.years) + '</span>' +
-    '<h2>' + esc(C.name) + '</h2><p>' + esc(RC.intro) + '</p><h3>YOUR TASK</h3><p>' + esc(RC.task) + '</p>' +
-    '<p style="opacity:.75;font-size:.9rem">Project RECLAIM and the year 2075 are fiction. Everything marked “real history” comes from NASA.</p>',
-    [{ label: 'Step outside', on: startWalk }, { label: 'Learn more', sec: true, keep: true, on: () => { hideCard(); learnMore(); setTimeout(() => { $('cardBox').querySelector('button').onclick = () => { hideCard(); showIntro(); }; }, 0); } }]);
+    '<h2>' + esc(C.name) + '</h2><p class="meta" style="opacity:.75">' + esc(C.where) + '</p><h3>YOUR TASK</h3><p>' + esc(RC.task) + '</p>' +
+    '<p style="opacity:.7;font-size:.88rem">Project RECLAIM and the year 2075 are fiction. Everything marked “real history” comes from NASA.</p>',
+    [{ label: 'Step outside', on: () => { startWalk(); say(MID + '_arrive'); } }, { label: 'Learn more', sec: true, keep: true, on: () => { hideCard(); learnMore(); setTimeout(() => { $('cardBox').querySelector('button').onclick = () => { hideCard(); showIntro(); }; }, 0); } }]);
 }
 function startWalk() {
   S.phase = 'walk'; S.camYaw = Math.atan2(S.ap.x - WORLD.rover[0], S.ap.z - WORLD.rover[1]); S.camDist = 7;
@@ -531,7 +554,7 @@ function driveStep(dt, opts = {}) {
   if (c.hit) { if (Math.abs(r.v) > 1) { beep(90, .12, 'square', .05); toast('Bump! Steer around rocks and craters', 1500); } r.v *= -.25; }
   const moved = Math.hypot(c.x - r.x, c.z - r.z); r.x = c.x; r.z = c.z; r.odo = (r.odo || 0) + moved;
   placeRover(dt);
-  for (const w of r.wheels) { w.spin.rotation.z -= (r.v + (MID === 'spirit' ? thr * (r.slip || 0) * 2 : 0)) * dt / w.r; if (w.front) w.steer.rotation.y = r.steer * .35; if (w.rear && WORLD.env === 'MOON') w.steer.rotation.y = -r.steer * .35; }
+  for (const w of r.wheels) { if (!(MID === 'spirit' && w.id === 'wRF')) w.spin.rotation.z -= (r.v + (MID === 'spirit' ? thr * (r.slip || 0) * 2 : 0)) * dt / w.r; if (w.front) w.steer.rotation.y = r.steer * .35; if (w.rear && WORLD.env === 'MOON') w.steer.rotation.y = -r.steer * .35; }
   const fast = Math.abs(r.v) / cfg.maxV + (MID === 'spirit' ? (r.slip || 0) * Math.abs(thr) : 0);
   if (fast > .15 && Math.random() < fast * dt * 30) { const bx = r.x - fx * 1.1, bz = r.z - fz * 1.1; emitDust(bx, height(bx, bz) + .2, bz, 2, MID === 'a17' ? .9 : (WORLD.env === 'MOON' ? 1.8 : .8)); }
   followCam(r.x, r.root.position.y, r.z, dt, Math.atan2(-fx, -fz));
@@ -547,12 +570,13 @@ function startDriveBriefing() {
   if (MID === 'a17') { const m = new THREE.Mesh(new THREE.BoxGeometry(.38, .28, .01), std(0xddd6bb, .8)); m.position.set(-1.15 - .36, -.05 + .36, 1.0); m.rotation.z = .785; roverPart.g.add(m); }
   S.ap = { x: rover.x + 2.6, z: rover.z + 1.5, yaw: -1.2 }; placeAstro(); camera.position.set(rover.x + 9, height(rover.x, rover.z) + 5, rover.z + 7); camera.lookAt(rover.x, height(rover.x, rover.z), rover.z);
   fadeTo(0, 700);
-  const remote = RC.drive.vehicle === 'remote', task = C.tasks.find(t => t.recipe === RC.repairs[RC.repairs.length - 1]);
-  showCard('<span class="tag rec">REPAIR STAGE COMPLETE</span><h2>' + esc(task.explain.title) + '</h2><p>' + esc(task.explain.text) + '</p>' +
-    '<h3>NEXT · FICTIONAL 2075 MISSION</h3><p>' + esc(RC.drive.call || RC.task) + '</p>' +
-    '<p style="opacity:.8">' + (remote ? C.short + ' is too small to ride, so you drive it by remote control. Mars rovers really drive slowly (a few centimetres per second); here time is sped up.' : 'You ride in the driver’s seat, on the left, as the Apollo commanders did.') + '</p>' +
-    '<h3>CONTROLS</h3><p class="mono" style="font-size:.85rem">W/S drive and brake · A/D steer · ' + (MID === 'spirit' ? 'hold Shift for careful, slow wheel speed' : 'Shift: slow and careful') + ' · drag mouse to look · E interact</p>',
+  const remote = RC.drive.vehicle === 'remote';
+  // a short card: Mission Control explains the next mission out loud
+  showCard('<span class="tag rec">REPAIR STAGE COMPLETE</span><span class="tag fic">NEXT · FICTIONAL 2075 MISSION</span><h2>' + esc(RC.drive.title || 'Drive mission') + '</h2><p>' + esc(RC.task) + '</p>' +
+    '<p style="opacity:.75;font-size:.9rem">' + (remote ? C.short + ' is too small to ride, so you drive it by remote control. Real Mars rovers drive a few centimetres per second; here time is sped up.' : 'You ride in the driver’s seat, on the left, as the Apollo commanders did.') + '</p>' +
+    '<p class="mono" style="font-size:.82rem;opacity:.85">W/S drive and brake · A/D steer · ' + (MID === 'spirit' ? 'hold Shift for slow, careful wheel speed' : 'Shift: slow and careful') + ' · drag to look · scroll to zoom · E interact</p>',
     [{ label: 'Start the drive', on: startDrive }]);
+  setTimeout(() => say(MID + '_drive').then(() => { if (MID === 'spirit') say('spirit_power'); }), 500);
 }
 function startDrive() {
   S.phase = 'drive'; S.driving = true; S.camDist = WORLD.env === 'MOON' ? 9 : 6.5; S.camPitch = .3; setKeys('W/S drive · A/D steer · Shift careful · drag to look · E interact');
@@ -566,57 +590,174 @@ function finishDrive() {
   for (const m of markers) m.visible = false;
   showCard('<span class="tag fic">FICTIONAL 2075 MISSION COMPLETE</span><h2>' + esc(C.short) + ': ' + esc(RC.word) + '</h2><p>' + esc(RC.done2075) + '</p>' +
     '<h3>WHAT REALLY HAPPENED</h3><p>' + esc(RC.real) + '</p><p>' + esc(C.after) + '</p>' +
-    '<details><summary>Learn more</summary><ul>' + C.facts.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul><p>Sources: ' + C.sources.map(([t, u]) => '<a href="' + u + '" target="_blank" rel="noopener">' + esc(t) + '</a>').join(' · ') + '</p></details>',
+    '<p style="font-size:.85rem;opacity:.75">Sources: ' + C.sources.map(([t, u]) => '<a href="' + u + '" target="_blank" rel="noopener">' + esc(t) + '</a>').join(' · ') + '</p>',
     [{ label: 'Return to the rocket', on: startWalkback }]);
+  setTimeout(() => say(MID + '_real'), 400);
 }
 /* ---- mission 1: Apollo 15 science expedition ---- */
+/* the three rock types the Apollo 15 crew collected; drawn on small canvases for the sampling stops */
+const ROCK_TYPES = {
+  basalt: { name: 'Basalt', look: 'Dark grey lava rock, full of small holes left by gas bubbles', col: '#4a4b50' },
+  anorth: { name: 'Anorthosite', look: 'Almost white, made of large pale crystals', col: '#e6e3da' },
+  breccia: { name: 'Breccia', look: 'Sharp chunks of different rocks cemented together', col: '#8d877f' } };
+const A15_SITES = [
+  { want: 'basalt', ask: 'The rille was probably carved by flowing lava. Pick up the lava rock: dark, with gas-bubble holes.' },
+  { want: 'breccia', ask: 'Impacts have pounded this slope for billions of years. Find the rock made of broken pieces welded together.' },
+  { want: 'anorth', ask: 'Geologists hoped to find a piece of the Moon’s original crust here: pale and crystal-rich.' }];
+function drawRock(cv, type, seed) {
+  const c = cv.getContext('2d'), x = cv.width / 2, y = cv.height / 2, s = Math.min(x, y) * .98, r = ROCK_TYPES[type];
+  c.clearRect(0, 0, cv.width, cv.height); c.beginPath();
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2, rr = s * (.78 + .22 * Math.sin(seed * 3.1 + i * 2.3)); c[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr * .8); }
+  c.closePath(); c.fillStyle = r.col; c.fill(); c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 2; c.stroke(); c.save(); c.clip();
+  if (type === 'basalt') { c.fillStyle = 'rgba(0,0,0,.6)'; for (let i = 0; i < 14; i++) { c.beginPath(); c.arc(x + Math.sin(i * 7 + seed) * s * .65, y + Math.cos(i * 5 + seed) * s * .5, 2 + (i % 3), 0, 7); c.fill(); } }
+  else if (type === 'anorth') { c.strokeStyle = 'rgba(150,150,150,.6)'; c.lineWidth = 1.5; for (let i = 0; i < 7; i++) { c.beginPath(); c.moveTo(x - s + i * s * .35, y - s); c.lineTo(x - s * .6 + i * s * .3, y + s); c.stroke(); } }
+  else { const cols = ['#5a5550', '#b5b0a8', '#3f3c39', '#d0cbc2']; for (let i = 0; i < 12; i++) { c.fillStyle = cols[i % 4]; c.fillRect(x + Math.sin(i * 3.7) * s * .65 - 7, y + Math.cos(i * 2.9) * s * .5 - 6, 12 + (i % 3) * 4, 9); } }
+  c.restore();
+}
+/* sampling stop: look at three rocks through the hand lens and bag the one the geologists want */
+function sampleSite(c, done) {
+  const site = A15_SITES[c.i], opts = ['basalt', 'anorth', 'breccia'].sort(() => Math.random() - .5); let wrong = 0;
+  $('cardBox').innerHTML = '<span class="tag rec">SAMPLE STOP · ' + esc(c.info.name) + '</span><h2>Choose the sample</h2><p>' + esc(site.ask) + '</p>' +
+    '<div class="rocks">' + opts.map((k, i) => '<button class="rock" type="button" data-k="' + k + '"><canvas width="132" height="104"></canvas><span class="lens">Hover or focus to look through the hand lens</span></button>').join('') + '</div>' +
+    '<p id="rockMsg" style="min-height:1.5em;font-weight:600"></p>';
+  $('card').style.display = 'flex'; S.card = true;
+  $('cardBox').querySelectorAll('.rock').forEach((el, i) => {
+    const k = el.dataset.k; drawRock(el.querySelector('canvas'), k, i * 3 + c.i + 2);
+    const look = () => { el.querySelector('.lens').textContent = 'Hand lens: ' + ROCK_TYPES[k].look; };
+    el.onmouseenter = look; el.onfocus = look;
+    el.onclick = () => {
+      if (k !== site.want) { wrong++; el.classList.add('no'); setTimeout(() => el.classList.remove('no'), 500); $('rockMsg').style.color = '#ff8a7a';
+        $('rockMsg').textContent = 'That is ' + ROCK_TYPES[k].name.toLowerCase() + '. ' + (wrong > 1 ? 'Hint: you want ' + ROCK_TYPES[site.want].name.toLowerCase() + '.' : 'Look again at the texture and colour.'); beep(170, .15, 'square', .05); if (wrong === 1) say('a15_wrong'); return; }
+      el.classList.add('bag'); $('cardBox').querySelectorAll('.rock').forEach(b => b.disabled = true); $('rockMsg').style.color = '#5dff9e';
+      $('rockMsg').textContent = 'Bagged: ' + ROCK_TYPES[k].name + (k === 'anorth' ? ' (in 1971 this was the Genesis Rock, sample 15415)' : '') + '.'; arp([660, 880, 1046]);
+      setTimeout(() => { hideCard(); done(); }, 1500);
+    };
+  });
+  $('cardBox').querySelector('.rock').focus({ preventScroll: true });
+}
 function driveCheckpoints() {
-  const cps = WORLD.checkpoints.map((p, i) => ({ p, info: RC.drive.checkpoints[i], done: false, m: addMarker(p[0], p[1], 0x46d9ff, RC.drive.checkpoints[i].name) }));
-  let idx = 0, hold = 0, home = null;
-  const next = () => { if (idx < cps.length) setObjective('Drive to ' + cps[idx].info.name + ' and stop to collect samples (' + idx + '/3)', cps[idx].p); else { setObjective('Samples aboard. Drive back to the rocket', [0, -10]); home = addMarker(0, -10, 0x5dff9e, 'RETURN', 7); } };
-  next();
+  const cps = WORLD.checkpoints.map((p, i) => ({ p, i, info: RC.drive.checkpoints[i], done: false, m: addMarker(p[0], p[1], 0x46d9ff, RC.drive.checkpoints[i].name) }));
+  let n = 0, home = false; const dist = c => Math.hypot(rover.x - c.p[0], rover.z - c.p[1]);
+  const goal = () => n < cps.length ? 'Collect a sample at each of the three sites, in any order (' + n + '/3)' : 'Samples aboard. Drive back to the rocket';
+  setObjective(goal(), cps[0].p);
+  S.onE = () => {
+    const c = cps.find(c => !c.done && dist(c) < 6); if (!c || Math.abs(rover.v) > 1.2) return;
+    rover.v = 0; setPrompt(null);
+    sampleSite(c, () => { c.done = true; c.m.visible = false; n++; say('a15_cp' + c.i);
+      if (n === cps.length) { home = true; addMarker(0, -10, 0x5dff9e, 'RETURN', 7); setTimeout(() => say('a15_home'), 300); } setObjective(goal(), home ? [0, -10] : cps.find(x => !x.done).p); });
+  };
   S.tick = dt => {
+    if (S.card) return;
     driveStep(dt); spinMarkers(dt); seatedIdle(dt);
-    if (idx < cps.length) {
-      const c = cps[idx], d = Math.hypot(rover.x - c.p[0], rover.z - c.p[1]);
-      if (d < 6 && Math.abs(rover.v) < 1.2) { hold += dt; meters(meter('COLLECTING SAMPLES', hold / 2, '#46d9ff')); if (hold > 2) { hold = 0; c.m.visible = false; fact(c.info.name, c.info.fact); arp([660, 880]); idx++; meters(''); next(); } }
-      else { hold = 0; meters(d < 12 ? meter('SLOW DOWN AND STOP INSIDE THE RING', 0) : ''); }
+    if (!home) {
+      const left = cps.filter(c => !c.done).sort((a, b) => dist(a) - dist(b)), c = left[0], d = dist(c); S.target = c.p;
+      const inRing = d < 6, slow = Math.abs(rover.v) < 1.2;
+      setPrompt(inRing && slow ? 'Collect a sample at ' + c.info.name : null);
+      meters(inRing && !slow ? meter('STOP INSIDE THE RING TO SAMPLE', 0) : '');
     } else if (Math.hypot(rover.x, rover.z + 10) < 7 && Math.abs(rover.v) < 1.5) finishDrive();
   };
 }
 /* ---- mission 2: Apollo 17 emergency rescue ---- */
+/* connector mini-game: the plug turns; push it in when its three pins line up with the socket */
+function connectorGame(done) {
+  $('cardBox').innerHTML = '<span class="tag fic">FICTIONAL 2075 EVENT</span><h2>Connect the spare battery</h2><p>The plug keeps turning in your glove. Push it in when the three amber pins line up with the three holes in the socket.</p>' +
+    '<canvas id="mini" width="260" height="260"></canvas><p id="miniMsg" style="min-height:1.4em;text-align:center;font-weight:600"></p><div class="row" style="justify-content:center"><button class="btn" id="push" type="button">Push the connector in (Space)</button></div>';
+  $('card').style.display = 'flex'; S.card = true; say('a17_connect');
+  const cv = $('mini'), c = cv.getContext('2d'); let a = Math.random() * 6, run = true, ok = 0, last = performance.now();
+  const draw = now => {
+    if (!run) return; requestAnimationFrame(draw); const dt = (now - last) / 1000; last = now; a += dt * (1.3 + ok * .5);
+    c.clearRect(0, 0, 260, 260); c.fillStyle = '#20252c'; c.beginPath(); c.arc(130, 130, 110, 0, 7); c.fill(); c.strokeStyle = '#46d9ff'; c.lineWidth = 2; c.stroke();
+    for (let i = 0; i < 3; i++) { const t = i * Math.PI * 2 / 3 - Math.PI / 2; c.fillStyle = '#05070a'; c.beginPath(); c.arc(130 + Math.cos(t) * 62, 130 + Math.sin(t) * 62, 13, 0, 7); c.fill(); c.strokeStyle = 'rgba(70,217,255,.6)'; c.stroke(); }
+    c.save(); c.translate(130, 130); c.rotate(a); c.fillStyle = 'rgba(200,204,210,.85)'; c.beginPath(); c.arc(0, 0, 80, 0, 7); c.fill();
+    for (let i = 0; i < 3; i++) { const t = i * Math.PI * 2 / 3 - Math.PI / 2; c.fillStyle = '#ffb000'; c.beginPath(); c.arc(Math.cos(t) * 62, Math.sin(t) * 62, 9, 0, 7); c.fill(); }
+    c.restore(); c.fillStyle = '#dbeaf2'; c.font = '700 13px "Space Mono", monospace'; c.textAlign = 'center'; c.fillText(ok + ' / 2 clamps locked', 130, 250);
+  };
+  requestAnimationFrame(draw);
+  $('push').onclick = () => {
+    const off = ((a % (Math.PI * 2 / 3)) + Math.PI * 2 / 3) % (Math.PI * 2 / 3), err = Math.min(off, Math.PI * 2 / 3 - off);
+    if (err < .2) { ok++; arp([660, 880]); $('miniMsg').style.color = '#5dff9e'; $('miniMsg').textContent = ok < 2 ? 'Click! One clamp locked. Once more to lock the second.' : 'Connected!';
+      if (ok >= 2) { run = false; setTimeout(() => { hideCard(); done(); }, 900); } }
+    else { beep(150, .15, 'square', .05); $('miniMsg').style.color = '#ff8a7a'; $('miniMsg').textContent = 'The pins hit the socket face. Wait until they line up with the holes.'; }
+  };
+  $('push').focus({ preventScroll: true });
+}
 function driveRescue() {
-  const T = WORLD.target, ana = makeAstronaut(0xf2f2ec, 0x46d9ff); ana.g.position.set(T[0], height(T[0], T[1]), T[1]); ana.g.rotation.y = 2.2; scene.add(ana.g); poseAstronaut(ana, 'remote', 0, 0);
-  ROCKS.push({ x: T[0], z: T[1], r: .6 });
-  addMarker(T[0], T[1], 0xff9a3c, 'DR RUIZ', 6);
-  let time = RC.drive.time, delivered = false, failed = false, hold = 0, factI = 0, start = Math.hypot(rover.x - T[0], rover.z - T[1]);
-  setObjective('Deliver the spare battery and water to Dr Ruiz before time runs out', T); fact('Emergency call (fictional)', RC.drive.call, 'FICTIONAL 2075 EVENT', 9000);
+  const T = WORLD.target, ana = makeAstronaut(0xf2f2ec, 0x46d9ff), other = MISSIONS.find(m => m.id === 'a15');
+  // Dr Ruiz's own stranded rover, with her kneeling at its battery bay (the front of the LRV)
+  const dead = makePart(wholeDef(other), 'normal'), droot = new THREE.Group(); droot.add(dead.g); dead.g.position.y = .45;
+  const dx = T[0] + 1.5, dz = T[1] - 2.2, dyaw = 2.6; droot.position.set(dx, height(dx, dz), dz); droot.rotation.y = dyaw; scene.add(droot);
+  droot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); droot.updateMatrixWorld(true);
+  const batt = dead.g.localToWorld(V(1.2, .2, 0)), lamp = new THREE.Mesh(new THREE.SphereGeometry(.06, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff3b2f })); lamp.position.set(.62, .62, 0); dead.g.add(lamp);
+  const fw = { x: Math.cos(dyaw), z: -Math.sin(dyaw) }, sd = { x: Math.sin(dyaw), z: Math.cos(dyaw) }, ax = batt.x + fw.x * .5 + sd.x * .85, az = batt.z + fw.z * .5 + sd.z * .85;
+  ana.g.position.set(ax, height(ax, az), az); ana.g.rotation.y = Math.atan2(batt.x - ax, batt.z - az); scene.add(ana.g);
+  ROCKS.push({ x: dx, z: dz, r: 1.7 }, { x: ax, z: az, r: .55 });
+  const mk = addMarker(T[0], T[1], 0xff9a3c, 'DR RUIZ', 7);
+  const box = new THREE.Mesh(new THREE.BoxGeometry(.42, .28, .3), std(0x4a4f57, .6, .4)); box.visible = false; box.castShadow = true; astro.hips.add(box); box.position.set(0, .2, .45);
+  let time = RC.drive.time, mode = 'drive', failed = false, factI = 0, start = Math.hypot(rover.x - T[0], rover.z - T[1]);
+  const pallet = () => roverPart.g.localToWorld(V(-1.45, .3, 0)), side = () => { const fx = Math.cos(rover.h), fz = -Math.sin(rover.h); return { x: rover.x + fz * 2.3, z: rover.z - fx * 2.3 }; };
+  setObjective('Reach Dr Ruiz with the spare battery before time runs out', T); say('a17_call');
+  S.onE = () => {
+    if (mode === 'arrived') { mode = 'walk'; seated.g.visible = false; const p = side(); S.ap = { x: p.x, z: p.z, yaw: rover.h }; astro.g.visible = true; placeAstro(); setKeys('WASD walk · Shift run · drag to look · E interact');
+      S.camDist = 6; setObjective('Take the spare battery from your rover’s rear pallet', [pallet().x, pallet().z]); }
+    else if (mode === 'walk' && Math.hypot(S.ap.x - pallet().x, S.ap.z - pallet().z) < 2.6) { mode = 'carry'; box.visible = true; beep(520, .08); setObjective('Carry the battery to the battery bay at the front of Dr Ruiz’s rover', [batt.x, batt.z]); }
+    else if (mode === 'carry' && Math.hypot(S.ap.x - batt.x, S.ap.z - batt.z) < 2.4) { mode = 'mini'; setPrompt(null);
+      connectorGame(() => { mode = 'board'; box.visible = false; lamp.material.color.setHex(0x5dff9e); mk.visible = false; arp([523, 659, 784, 1047]); say('a17_saved').then(() => say('a17_f2'));
+        setObjective('Climb back aboard your rover', [rover.x, rover.z]); }); }
+    else if (mode === 'board' && Math.hypot(S.ap.x - rover.x, S.ap.z - rover.z) < rover.r + 2) { mode = 'home'; astro.g.visible = false; seated.g.visible = true; S.camDist = 9; setKeys('W/S drive · A/D steer · Shift careful · drag to look · E interact');
+      setObjective('Drive back safely to the rocket', [0, -10]); addMarker(0, -10, 0x5dff9e, 'RETURN', 7); }
+  };
   S.tick = dt => {
-    if (S.card) return; driveStep(dt, { locked: failed }); spinMarkers(dt); seatedIdle(dt); poseAstronaut(ana, 'idle', dt, 0);
-    const d = Math.hypot(rover.x - T[0], rover.z - T[1]);
-    if (!delivered) {
-      time -= dt; const prog = 1 - d / start;
-      if (factI < 2 && prog > (factI + 1) * .3) { fact(...RC.drive.facts[factI]); factI++; }
-      meters(meter('TIME LEFT ' + Math.max(0, Math.ceil(time)) + ' s', time / RC.drive.time, time < 30 ? '#ff6b5a' : '#ffb000') + (d < 9 ? meter('STOP NEXT TO DR RUIZ TO DELIVER', hold / 1.5, '#5dff9e') : ''));
-      if (d < 7.5 && Math.abs(rover.v) < 1) { hold += dt; if (hold > 1.5) { delivered = true; arp([523, 659, 784]); toast('Supplies delivered! Dr Ruiz is safe. Now drive back to the rocket.'); fact(...RC.drive.facts[2]); setObjective('Drive back safely to the rocket', [0, -10]); addMarker(0, -10, 0x5dff9e, 'RETURN', 7); meters(''); } } else hold = 0;
+    if (S.card) return; spinMarkers(dt); poseAstronaut(ana, mode === 'board' || mode === 'home' ? 'idle' : 'kneel', dt, 0);
+    S.driving = mode === 'drive' || mode === 'arrived' || mode === 'home';
+    if (mode === 'drive' || mode === 'arrived' || mode === 'home') { driveStep(dt, { locked: failed }); seatedIdle(dt); }
+    if (mode === 'drive') {
+      const d = Math.hypot(rover.x - T[0], rover.z - T[1]); time -= dt; const prog = 1 - d / start;
+      if (factI < 2 && prog > (factI + 1) * .3) { say('a17_f' + factI); factI++; }
+      meters(meter('TIME LEFT ' + Math.max(0, Math.ceil(time)) + ' s', time / RC.drive.time, time < 30 ? '#ff6b5a' : '#ffb000') + (d < 10 ? '<div class="meter" style="color:#5dff9e">STOP NEXT TO DR RUIZ</div>' : ''));
+      if (d < 8.5 && Math.abs(rover.v) < 1) { mode = 'arrived'; rover.v = 0; meters(''); arp([523, 659]); say('a17_arrive_ana'); setObjective('You made it in time. Climb off the rover', null); }
       if (time <= 0 && !failed) { failed = true; showCard('<span class="tag fic">FICTIONAL 2075 EVENT</span><h2>Out of time</h2><p>Dr Ruiz’s reserve ran low before you arrived. Plan a straighter route around the rocks and try again.</p>',
         [{ label: 'Try again', on: () => { rover.x = WORLD.rover[0]; rover.z = WORLD.rover[1]; rover.h = WORLD.roverYaw; rover.v = 0; time = RC.drive.time; failed = false; factI = 0; } }]); }
-    } else if (Math.hypot(rover.x, rover.z + 10) < 7 && Math.abs(rover.v) < 1.5) finishDrive();
+    } else if (mode === 'arrived') { rover.v = 0; setPrompt('Climb off the rover'); }
+    else if (mode === 'walk' || mode === 'carry' || mode === 'board') {
+      walk(dt); if (mode === 'carry') poseAstronaut(astro, 'carry', 0, 0); followCam(S.ap.x, height(S.ap.x, S.ap.z), S.ap.z, dt);
+      const p = pallet(); if (mode === 'walk') S.target = [p.x, p.z]; if (mode === 'board') S.target = [rover.x, rover.z];
+      setPrompt(mode === 'walk' ? (Math.hypot(S.ap.x - p.x, S.ap.z - p.z) < 2.6 ? 'Lift out the spare battery' : null) : mode === 'carry' ? (Math.hypot(S.ap.x - batt.x, S.ap.z - batt.z) < 2.4 ? 'Connect the battery' : null)
+        : (Math.hypot(S.ap.x - rover.x, S.ap.z - rover.z) < rover.r + 2 ? 'Board the rover' : null));
+    } else if (mode === 'home') { setPrompt(null); if (Math.hypot(rover.x, rover.z + 10) < 7 && Math.abs(rover.v) < 1.5) finishDrive(); }
   };
 }
 /* ---- mission 3: Spirit escape from Troy (fiction: the real Spirit never escaped) ---- */
+/* the dead right-front wheel ploughs a bright trail of silica-rich soil (shown as flat decals on the ground) */
+function silicaTrail() {
+  const n = 700, mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(.26, .5).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf3efe2, emissive: 0x3a362c, roughness: 1, transparent: true, opacity: .92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), n);
+  mesh.count = 0; mesh.frustumCulled = false; scene.add(mesh); const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+  return { mesh, last: null, add(x, z, yaw) { if (this.last && Math.hypot(x - this.last.x, z - this.last.z) < .32) return false; this.last = { x, z }; q.setFromAxisAngle(YAX, yaw); p.set(x, height(x, z) + .04, z);
+    m.compose(p, q, s); mesh.setMatrixAt(mesh.count % n, m); mesh.count = Math.min(n, mesh.count + 1); mesh.instanceMatrix.needsUpdate = true; return true; } };
+}
 function driveEscape() {
-  const G = WORLD.goal; addMarker(G[0], G[1], 0xffd24a, 'SUNNY SLOPE', 7); let factI = 0;
-  setObjective('Drive Spirit out of the soft soil to the sunny slope. Watch the wheel slip', G);
-  fact('Fiction, clearly labelled', 'This escape is a 2075 “what if”. The real Spirit never got free of Troy. Spirit’s dead right-front wheel still drags, so it pulls to the right.', 'FICTIONAL 2075 EVENT', 9000);
-  const gates = [[16, -44], [20, -64], [30, -80]];
+  const G = WORLD.goal; addMarker(G[0], G[1], 0xffd24a, 'NORTH-FACING SLOPE', 7); let factI = 0, power = 55, dead = false, trail = silicaTrail(), drops = 0, paused = false;
+  const rf = rover.wheels.find(w => w.id === 'wRF');
+  setObjective('Drive Spirit out of the soft soil onto the north-facing slope before its power runs out', G);
+  toast('This rescue is a 2075 “what if”. The real Spirit never got free of Troy.', 6000);
+  const gates = [[12, -46], [26, -74]];
   S.tick = dt => {
-    driveStep(dt); spinMarkers(dt); poseAstronaut(astro, 'remote', dt, 0);
+    if (S.card || S.atGoal) { if (S.atGoal) followCam(rover.x, rover.root.position.y, rover.z, dt); return; }
+    const thr = dead ? 0 : (down('w', 'arrowup') ? 1 : 0) - (down('s', 'arrowdown') ? 1 : 0), moved = driveStep(dt, { noPower: dead }); spinMarkers(dt); poseAstronaut(astro, 'remote', dt, 0);
     const soft = inSoft(rover.x, rover.z), slip = rover.slip || 0;
-    meters(meter('WHEEL SLIP ' + Math.round(slip * 100) + '%', slip, slip > .7 ? '#ff6b5a' : slip > .4 ? '#ffb000' : '#5dff9e') + meter('SINKAGE ' + Math.round((rover.sink || 0) * 100) + ' cm', (rover.sink || 0) / .35, '#ff9a3c') +
-      '<div class="meter" style="color:' + (soft ? '#ffb000' : '#5dff9e') + '">' + (soft ? 'SOFT SOIL: ease off, hold Shift' : 'FIRM GROUND') + '</div>');
-    if (factI < 3 && Math.hypot(rover.x - gates[factI][0], rover.z - gates[factI][1]) < 9) { fact(...RC.drive.facts[factI]); factI++; }
-    if (Math.hypot(rover.x - G[0], rover.z - G[1]) < 7) finishDrive();
+    // driving costs energy; spinning wheels that slip burn energy without moving Spirit
+    if (!dead) { power -= moved * .2 + Math.abs(thr) * slip * dt * 1.6 + dt * .04; if (power <= 0) { power = 0; dead = true;
+      showCard('<span class="tag fic">FICTIONAL 2075 EVENT</span><h2>Out of power</h2><p>Spirit’s battery is flat. Most of the energy went into wheels spinning in loose sand. Drive slowly (hold Shift) in soft soil, where the wheels grip instead of digging in.</p>',
+        [{ label: 'Try again', on: () => { rover.x = WORLD.rover[0]; rover.z = WORLD.rover[1]; rover.h = WORLD.roverYaw; rover.v = 0; rover.sink = 0; rover.slip = 0; power = 55; dead = false; } }]); } }
+    // the dragged dead wheel leaves bright soil behind it
+    if (Math.abs(rover.v) > .05) { const wp = rf.steer.getWorldPosition(new THREE.Vector3()); if (trail.add(wp.x, wp.z, rover.h + Math.PI / 2)) drops++; }
+    if (drops > 30 && !paused) { paused = true; rover.v = 0; say('spirit_silica');
+      showCard('<span class="tag real">REAL NASA HISTORY · 2007</span><h2>Bright soil behind the dead wheel</h2><p>Spirit’s broken right-front wheel cannot turn, so it slides and ploughs a trench. In 2007 a trench like this exposed bright soil that was about <b>90% silica</b>.</p><p>On Earth, soil this rich in silica forms around hot springs or steam vents. It was strong evidence that hot water once flowed on ancient Mars, found thanks to a broken wheel.</p>',
+        [{ label: 'Keep driving' }]); }
+    meters(meter('POWER ' + Math.round(power) + '%', power / 100, power < 15 ? '#ff6b5a' : power < 30 ? '#ffb000' : '#5dff9e') +
+      meter('WHEEL SLIP ' + Math.round(slip * 100) + '%', slip, slip > .7 ? '#ff6b5a' : slip > .4 ? '#ffb000' : '#5dff9e') + meter('SINKAGE ' + Math.round((rover.sink || 0) * 100) + ' cm', (rover.sink || 0) / .35, '#ff9a3c') +
+      '<div class="meter" style="color:' + (soft ? '#ffb000' : '#5dff9e') + '">' + (soft ? 'SOFT SOIL: hold Shift for slow wheels' : 'FIRM GROUND') + '</div><div class="meter" style="color:#9fd8ea">Right-front wheel: dead, dragging</div>');
+    if (factI < gates.length && Math.hypot(rover.x - gates[factI][0], rover.z - gates[factI][1]) < 12) { say('spirit_f' + factI); factI++; }
+    if (Math.hypot(rover.x - G[0], rover.z - G[1]) < 7 && !S.atGoal) { S.atGoal = true; rover.v = 0; dead = true; meters(meter('PANEL TILT TOWARD THE SUN 15°: POWER RISING', 1, '#ffd24a')); say('spirit_slope', { now: true }).then(finishDrive); }
   };
 }
 /* ---- mission 4: Opportunity, the last signal (fiction: the real Opportunity never answered) ---- */
@@ -624,11 +765,11 @@ function driveSignal() {
   const G = WORLD.goal, sci = WORLD.science.map((p, i) => ({ p, done: false, m: addMarker(p[0], p[1], 0xffb000, 'SCIENCE', 3.2) }));
   addMarker(G[0], G[1], 0x46d9ff, 'SIGNAL RIDGE', 6); let batt = 75, sent = false, dead = false;
   setObjective('Reach the signal ridge and transmit before the battery runs out. Optional: scan science sites (E)', G);
-  fact('Fiction, clearly labelled', 'This recovery is a 2075 “what if”. The real Opportunity never answered after June 2018.', 'FICTIONAL 2075 EVENT', 8000);
+  toast('This recovery is a 2075 “what if”. The real Opportunity never answered after June 2018.', 6000);
   S.onE = () => {
     if (dead || sent) return;
     const near = sci.find(s => !s.done && Math.hypot(rover.x - s.p[0], rover.z - s.p[1]) < 5);
-    if (near) { if (batt < 8) return toast('Not enough power for the instruments'); batt -= 6; near.done = true; near.m.visible = false; fact(...RC.drive.facts[sci.indexOf(near)]); return; }
+    if (near) { if (batt < 8) return toast('Not enough power for the instruments'); batt -= 6; near.done = true; near.m.visible = false; say('opportunity_f' + sci.indexOf(near)); return; }
     if (Math.hypot(rover.x - G[0], rover.z - G[1]) < 7) { if (batt < 10) return toast('Not enough power to transmit: stop and let the panels recharge'); batt -= 10; sent = true; beep(880, .2); beep(1320, .2, 'sine', .06, .25); toast('Report transmitted to Earth!'); setTimeout(finishDrive, 1500); }
   };
   S.tick = dt => {
@@ -690,9 +831,9 @@ function montage() {
     if (idx !== shown) {
       shown = idx; arp([392 + idx * 60, 523 + idx * 60]);
       if (idx < 4) { const it = items[idx]; end.innerHTML = '<div class="sub fadein">' + esc(it.m.short.toUpperCase()) + '</div><div class="word fadein" style="color:' + it.m.accent + '">' + esc(RECLAIM[it.id].word) + '</div>'; }
-      else end.innerHTML = '<div class="mc fadein"><div class="sub">MISSION CONTROL · 2075 · FICTIONAL</div>' + esc(RECLAIM_ENDING) + '</div>' +
+      else { say('ending'); end.innerHTML = '<div class="mc fadein"><div class="sub">MISSION CONTROL · 2075 · FICTIONAL</div>' + esc(RECLAIM_ENDING) + '</div>' +
         '<div class="fadein" style="animation-delay:1.6s;margin-top:26px"><h1>ABANDONED, NOT FORGOTTEN</h1><div class="quote">“Their journeys ended. Our exploration continues.”</div></div>' +
-        '<div class="row fadein" style="animation-delay:2.4s"><a class="btn" href="index.html">Replay missions</a><a class="btn sec" href="' + HOMEPAGE + '">Homepage</a></div>';
+        '<div class="row fadein" style="animation-delay:2.4s"><a class="btn" href="index.html">Replay missions</a><a class="btn sec" href="' + HOMEPAGE + '">Homepage</a></div>'; }
     }
   };
 }

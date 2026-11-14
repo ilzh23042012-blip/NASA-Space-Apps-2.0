@@ -79,6 +79,7 @@
     <a class="btn alt" href="https://jovial-donut-bcf3e8.netlify.app/">← The Last Transmission</a>
     <a class="btn alt" href="repair.html">Free play: all repairs</a>
     <button class="btn alt" id="reset" type="button">Reset progress</button>
+    <button class="btn alt" id="askCtl" type="button" hidden>Ask me about controls again</button>
   </footer>
   <p class="note">Historical information from NASA (Apollo mission summaries, NASA History SP-4029; NASA Science mission pages). 3D models are simplified illustrations, not to scale.</p>
 </main>
@@ -122,6 +123,9 @@ function showBody(body) {
   $('#cards').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 document.querySelectorAll('.dest').forEach(b => b.onclick = () => showBody(b.dataset.body));
+/* the repair bay remembers "hand gestures or mouse" if the player chose "Never ask again"; this brings the question back */
+try { if (localStorage.getItem('reclaimAsk') === 'never') $('#askCtl').hidden = false; } catch (e) {}
+$('#askCtl').onclick = () => { try { localStorage.setItem('reclaimAsk', 'ask'); } catch (e) {} $('#askCtl').hidden = true; };
 $('#reset').onclick = () => { if (confirm('Reset all Project RECLAIM progress?')) { try { localStorage.removeItem(progressKey); } catch (e) {} renderProgress(); const sel = $('.dest.sel'); if (sel) showBody(sel.dataset.body); } };
 (function tick(t) { requestAnimationFrame(tick); for (const p of previews) { p.piv.rotation.y = t / 2600; R.render(p.sc, p.cam); p.ctx.clearRect(0, 0, 480, 304); p.ctx.drawImage(R.domElement, 0, 0); } })(0);
 

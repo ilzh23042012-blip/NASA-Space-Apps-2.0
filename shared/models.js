@@ -12,10 +12,15 @@ function strut(add, M, a, b, r = .02, c = STEEL) {
 const tagged = (add, key) => (...a) => { const m = add(...a); m.userData[key] = true; return m; };
 /* Spirit / Opportunity wheel (aluminium, cleated) */
 function wheelBuild(add, M) {
-  const r = PIE / 2;
-  add(new CylG(.33, .33, .26, 14), M(0x1c1c1e, .1, .95, 0, true), 0, 0, 0, r, 0, 0); add(new CylG(.23, .23, .28, 14), M(0x8f9aa5, .85, .3), 0, 0, 0, r, 0, 0);
-  add(new BoxG(.4, .05, .29), M(0x5f6a75, .8, .4)); add(new BoxG(.05, .4, .29), M(0x5f6a75, .8, .4)); add(new CylG(.07, .07, .33, 8), M(GOLD, .9, .3), 0, 0, 0, r, 0, 0);
-  for (let i = 0; i < 10; i++) { const a = i / 10 * PIE * 2; add(new BoxG(.05, .08, .27), M(0x111113, .1, .95), Math.cos(a) * .34, Math.sin(a) * .34, 0, 0, 0, a); }
+  const r = PIE / 2, al = M(0xa9b1b8, .85, .35), rim = M(0x9aa3ab, .85, .4); rim.side = THREE.DoubleSide;
+  add(new CylG(.33, .33, .26, 24, 1, true), rim, 0, 0, 0, r, 0, 0); add(new CylG(.3, .3, .2, 24, 1, true), rim, 0, 0, 0, r, 0, 0);
+  for (const z of [-.13, .13]) add(new THREE.TorusGeometry(.315, .016, 6, 28), al, 0, 0, z);
+  for (let i = 0; i < 6; i++) {   // curved titanium flexure spokes, as on the real MER wheels
+    const a = i / 6 * PIE * 2, pts = [.07, .16, .3].map((rr, k) => [Math.cos(a + k * .32) * rr, Math.sin(a + k * .32) * rr]);
+    for (let k = 0; k < 2; k++) { const [x0, y0] = pts[k], [x1, y1] = pts[k + 1]; add(new BoxG(Math.hypot(x1 - x0, y1 - y0) + .02, .022, .04), al, (x0 + x1) / 2, (y0 + y1) / 2, 0, 0, 0, Math.atan2(y1 - y0, x1 - x0)); }
+  }
+  add(new CylG(.075, .075, .2, 12), M(0x6f7780, .8, .4), 0, 0, 0, r, 0, 0); add(new CylG(.05, .05, .24, 10), M(GOLD, .9, .3), 0, 0, 0, r, 0, 0);
+  for (let i = 0; i < 16; i++) { const a = i / 16 * PIE * 2; add(new BoxG(.035, .03, .26), M(0x7d858d, .8, .45), Math.cos(a) * .34, Math.sin(a) * .34, 0, 0, 0, a); }
 }
 /* Apollo LRV wheel: woven wire mesh with titanium chevron treads and a hub drive motor */
 function lrvWheelBuild(add, M) {
@@ -47,9 +52,10 @@ function lrvParts(a17) {
         add(new BoxG(1.2, .05, 1.0), al, 0, .12, 0); add(new BoxG(.75, .05, .9), al, .98, .12, 0); add(new BoxG(.75, .05, .9), al, -.98, .12, 0);
         for (const z of [-.47, .47]) add(new BoxG(2.7, .05, .05), tube, 0, .1, z);
         for (const x of [-1.15, 1.15]) for (const s of [-1, 1]) { strut(add, M, V(x * .7, .1, s * .45), V(x, -.05, s * .86), .022, 0x9aa0a8); strut(add, M, V(x * 1.13, .1, s * .45), V(x, -.05, s * .86), .022, 0x9aa0a8); }
-        add(new BoxG(.3, .03, .8), M(0x6b6f75, .5, .6), .52, .16, 0); } },
+        add(new BoxG(.3, .03, .8), M(0x6b6f75, .5, .6), .52, .16, 0);
+        for (const s of [-1, 1]) { add(new BoxG(.5, .02, .16), al, .28, .06, s * .6); strut(add, M, V(.05, .1, s * .5), V(.05, .5, s * .52), .012); strut(add, M, V(.05, .5, s * .52), V(-.45, .5, s * .52), .012); } } },   // footrests and handholds
     { id: 'seats', kind: 'seats', name: 'Crew seats', home: V(-.15, .15, 0), dir: V(0, 1, 0), info: 'Two folding seats with seat belts. The astronauts drove sitting down, in pressurised suits.', build(add, M) {
-        for (const z of [-.3, .3]) { add(new BoxG(.45, .05, .42), M(0x6f747b, .4, .6), 0, .08, z); add(new BoxG(.05, .42, .42), M(0x6f747b, .4, .6), -.25, .3, z, 0, 0, -.15);
+        for (const z of [-.3, .3]) { add(new BoxG(.45, .05, .42), M(0x7f8c99, .3, .7), 0, .08, z); add(new BoxG(.05, .42, .42), M(0x7f8c99, .3, .7), -.25, .3, z, 0, 0, -.15);
           strut(add, M, V(.2, .08, z), V(.2, -.02, z), .012); strut(add, M, V(-.2, .08, z), V(-.2, -.02, z), .012); } } },
     { id: 'hc', kind: 'hc', name: 'Hand controller (T-handle)', home: V(.22, .15, 0), dir: V(.3, 1, 0).normalize(), info: 'One T-shaped handle between the seats: push forward to go, pull back to brake, tilt left or right to steer.', build(add, M) {
         add(new BoxG(.1, .06, .1), M(0x2a2d33, .5, .5), 0, .03, 0); add(new CylG(.022, .022, .3, 10), M(0x9aa0a8, .8, .3), 0, .2, 0); add(new BoxG(.05, .045, .2), M(0x1d1f23, .4, .6), 0, .36, 0); } },
@@ -58,11 +64,15 @@ function lrvParts(a17) {
         for (let i = 0; i < 6; i++) add(new CylG(.025, .025, .02, 12), M(0xdedede, .4, .5), .115, .48 + (i % 2) * .1, -.14 + (i / 2 | 0) * .14, 0, 0, PIE / 2 - .35);
         add(new SphG(.05, 12, 8), M(0x1a1a1a, .3, .4), .11, .62, 0); } },
     { id: 'batt', kind: 'batt', name: 'Batteries (2 × 36-volt silver-zinc)', gen: 'Battery', home: V(1.05, .2, 0), dir: V(1, .5, 0).normalize(), info: 'Two non-rechargeable batteries powered the wheel motors and steering. No solar panels and no nuclear power.', build(add, M) {
-        for (const z of [-.22, .22]) { add(new BoxG(.3, .14, .3), M(0x4a4f57, .6, .5), 0, 0, z); add(new BoxG(.32, .02, .32), M(0xeeeeee, .3, .6), 0, .08, z); } } },
+        for (const z of [-.22, .22]) { add(new BoxG(.3, .14, .3), M(0x4a4f57, .6, .5), 0, 0, z); add(new BoxG(.32, .02, .32), M(0xdedede, .3, .6), 0, .08, z);
+          add(new BoxG(.24, .01, .24), M(0xf6f8fa, 1, .05), 0, .095, z);   // mirror radiators that shed the batteries' heat
+          add(new BoxG(.3, .01, .3), M(0xe8e4d8, .2, .7), -.17, .2, z, 0, 0, 1.2); } } },   // dust cover, opened
     { id: 'lcru', kind: 'comm', name: 'Lunar Communications Relay Unit', gen: 'Radio relay', home: V(1.32, .25, .05), dir: V(1, .5, 0).normalize(), info: 'Let the crew talk to Earth directly and sent colour TV through the umbrella-shaped high-gain antenna.', build(add, M) {
         add(new BoxG(.22, .2, .36), M(0xd9d9d9, .6, .4)); strut(add, M, V(0, .1, .1), V(0, .95, .1), .015);
         const um = M(0xe8e8e8, .4, .5); um.side = THREE.DoubleSide; add(new CylG(.42, .02, .14, 18, 1, true), um, 0, 1.0, .1, 0, 0, .35);
-        add(new CylG(.012, .012, .7, 6), M(0x9aa0a8, .8, .4), 0, .45, -.18); } },
+        add(new CylG(.012, .012, .7, 6), M(0x9aa0a8, .8, .4), 0, .45, -.18);
+        for (let i = 0; i < 6; i++) add(new THREE.TorusGeometry(.035, .006, 4, 14), M(0xc9ccd0, .7, .4), 0, .62 + i * .045, -.18, PIE / 2, 0, 0);   // low-gain helical antenna
+        for (let i = 0; i < 8; i++) { const a = i / 8 * PIE * 2; strut(add, M, V(Math.cos(a) * .03, .97, .1 + Math.sin(a) * .03), V(Math.cos(a) * .4, 1.04, .1 + Math.sin(a) * .4), .006, 0xc9ccd0); } } },   // umbrella antenna ribs
     { id: 'tv', kind: 'tv', name: 'Remote-controlled TV camera', gen: 'TV camera', home: V(1.38, .5, -.32), dir: V(1, .4, -.5).normalize(), info: 'Controllers on Earth could point and zoom this colour TV camera. It filmed the Lunar Module lifting off.', build(add, M) {
         strut(add, M, V(0, -.3, 0), V(0, 0, 0), .015); add(new BoxG(.13, .12, .18), M(0xeeeeee, .4, .5), 0, .06, 0); add(new CylG(.035, .035, .08, 10), M(0x1a1a1a, .4, .5), .1, .06, 0, 0, 0, PIE / 2); } },
     { id: 'pallet', kind: 'pallet', name: 'Tool and sample pallet', gen: 'Tool pallet', home: V(-1.25, .3, 0), dir: V(-1, .4, 0).normalize(), info: 'Carried rakes, scoops, tongs, core tubes and bags for rock and soil samples.', build(add, M) {
@@ -81,19 +91,36 @@ function merParts(spirit) {
   const P = [
     { id: 'body', kind: 'chassis', name: 'Warm electronics box', home: V(0, 0, 0), dir: V(0, 0, 0), info: 'Holds the computer and batteries, kept warm by electric heaters and small radioisotope heater units.', build(add, M) {
         add(new BoxG(1.5, .42, 1.0), M(0xe9e5dc, .35, .55)); add(new BoxG(1.54, .05, 1.04), M(GOLD, .9, .3), 0, -.22, 0);
-        for (const z of [-1, 1]) { add(new BoxG(1.7, .05, .05), M(STEEL, .8, .4), 0, -.12, z * .68); add(new BoxG(.05, .05, .2), M(STEEL, .8, .4), 0, -.12, z * .58);
-          for (const x of [-.75, 0, .75]) add(new BoxG(.05, .26, .05), M(STEEL, .8, .4), x, -.25, z * .68); }
-        add(new CylG(.012, .012, .55, 6), M(0x888888, .8, .4), -.6, .5, -.38); add(new SphG(.025, 8, 8), glow(0xffb000), -.6, .78, -.38); } },
+        const T = 0xd6d6cf;   // rocker-bogie suspension: a rocker on each side, with a bogie carrying the middle and rear wheels
+        for (const s of [-1, 1]) { const z = s * .52, P = V(.12, -.14, z), A = V(.75, -.2, z), Bg = V(-.38, -.3, z);
+          strut(add, M, V(.12, -.02, s * .48), P, .03, T); strut(add, M, P, A, .028, T); strut(add, M, P, Bg, .028, T);
+          strut(add, M, Bg, V(0, -.3, z), .024, T); strut(add, M, Bg, V(-.75, -.3, z), .024, T);
+          for (const [x, y] of [[.75, -.2], [0, -.3], [-.75, -.3]]) { strut(add, M, V(x, y, z), V(x, -.42, z), .024, T); add(new CylG(.03, .03, .12, 8), M(STEEL, .8, .4), x, -.42, s * .58, PIE / 2, 0, 0); }
+          for (const x of [.75, -.75]) add(new CylG(.055, .055, .1, 12), M(0x2e3238, .6, .5), x, -.2, z);   // steering actuators on the corner wheels
+          add(new SphG(.05, 10, 8), M(GOLD, .9, .3), P.x, P.y, z); add(new SphG(.04, 10, 8), M(GOLD, .9, .3), Bg.x, Bg.y, z); }
+        add(new BoxG(.06, .07, .34), M(0x2a2d33, .5, .5), .78, -.08, 0); for (const z of [-.12, .12]) add(new CylG(.025, .025, .03, 10), glow(0x66e6ff), .815, -.08, z, 0, 0, PIE / 2);   // front hazard cameras
+        add(new BoxG(.06, .07, .34), M(0x2a2d33, .5, .5), -.78, -.08, 0);   // rear hazard cameras
+        add(new CylG(.012, .012, .5, 6), M(0x9aa0a8, .8, .4), -.6, .5, -.4); add(new SphG(.025, 8, 8), M(0xdedede, .5, .5), -.6, .76, -.4);   // low-gain antenna
+        add(new CylG(.014, .014, .34, 6), M(0x9aa0a8, .8, .4), -.82, .42, -.2); add(new SphG(.022, 8, 8), glow(0xffb000), -.82, .6, -.2);   // UHF antenna for the orbiter relay
+        add(new CylG(.06, .06, .02, 16), M(0xe6e6e0, .4, .5), -.62, .29, .38); add(new CylG(.006, .006, .08, 6), M(0x333333, .5, .5), -.62, .33, .38); } },   // Pancam calibration target (sundial)
     { id: 'solar', kind: 'solar', name: 'Solar arrays', home: V(0, .24, 0), dir: V(0, 1, 0), info: 'About 1.3 square metres of solar cells, the rover’s only source of power.', build(add, M) {
-        const cell = M(0x1b2c52, .55, .22), line = M(0x9fb3d1, .8, .3), fr = M(STEEL, .8, .4);
-        const pan = (x, z, sx, sz) => { add(new BoxG(sx + .04, .02, sz + .04), fr, x, -.012, z); add(new BoxG(sx, .03, sz), cell, x, 0, z);
-          for (let i = 1; i < 4; i++) add(new BoxG(.01, .034, sz), line, x - sx / 2 + i * sx / 4, .001, z); add(new BoxG(sx, .034, .01), line, x, .001, z); };
-        pan(0, 0, 1.45, 1.0); pan(0, .83, 1.45, .66); pan(0, -.83, 1.45, .66); pan(-.95, 0, .45, .9); } },
+        const outline = [[.78, -.5], [.78, .5], [.36, .6], [.12, 1.06], [-.36, 1.12], [-.62, .56], [-1.26, .46], [-1.26, -.46], [-.62, -.56], [-.36, -1.12], [.12, -1.06], [.36, -.6]];
+        const shape = new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x, z))), geo = new THREE.ExtrudeGeometry(shape, { depth: .03, bevelEnabled: false });
+        const cv = document.createElement('canvas'); cv.width = cv.height = 64; const c = cv.getContext('2d'); c.fillStyle = '#1b2c52'; c.fillRect(0, 0, 64, 64); c.strokeStyle = '#8fa6c9'; c.lineWidth = 2; c.strokeRect(1, 1, 62, 62);
+        c.strokeStyle = 'rgba(143,166,201,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(32, 0); c.lineTo(32, 64); c.moveTo(0, 32); c.lineTo(64, 32); c.stroke();
+        const tex = new THREE.CanvasTexture(cv); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(5, 5);
+        const cell = M(0xffffff, .5, .3); if (cell.isMeshStandardMaterial) cell.map = tex;
+        add(geo, cell, 0, 0, 0, PIE / 2, 0, 0);
+        const rim = add(new THREE.ExtrudeGeometry(new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x * 1.015, z * 1.015))), { depth: .02, bevelEnabled: false }), M(0xc9d2dc, .8, .4), 0, -.008, 0, PIE / 2, 0, 0);
+        for (const [x, z] of [[.3, .8], [.3, -.8], [-.9, 0]]) strut(add, M, V(x * .6, -.2, z * .5), V(x, -.03, z), .012); } },
     { id: 'mast', kind: 'mast', spare: true, name: 'Pancam mast', gen: 'Camera mast', home: V(.55, .26, .3), dir: V(.3, 1, .3).normalize(), info: 'Panoramic and navigation cameras about 1.5 m up, roughly the eye height of a person. Pancam also measured how dusty the sky was by photographing the Sun.', build(add, M) {
-        add(new CylG(.035, .035, .85, 8), M(STEEL, .7, .4), 0, .425, 0); add(new BoxG(.13, .13, .46), M(0x5a616b, .5, .5), 0, .9, 0);
-        for (const z of [-.18, .18]) add(new CylG(.035, .035, .04, 10), glow(0x66e6ff), .075, .9, z, 0, 0, PIE / 2); } },
+        add(new CylG(.035, .035, .8, 8), M(0xd6d6cf, .7, .4), 0, .4, 0); add(new BoxG(.09, .1, .1), M(0x8a9098, .6, .4), 0, .82, 0);
+        add(new BoxG(.11, .09, .5), M(0x4a5059, .5, .5), .02, .9, 0); add(new BoxG(.012, .1, .5), M(GOLD, .9, .3), -.04, .9, 0);
+        for (const z of [-.2, .2]) add(new CylG(.032, .032, .05, 12), glow(0x66e6ff), .09, .9, z, 0, 0, PIE / 2);
+        for (const z of [-.06, .06]) add(new CylG(.02, .02, .05, 10), glow(0x9fe8ff), .09, .9, z, 0, 0, PIE / 2); } },
     { id: 'hga', kind: 'hga', spare: true, name: 'High-gain antenna', gen: 'High-gain antenna', home: V(-.25, .26, -.3), dir: V(-.3, 1, -.3).normalize(), info: 'A steerable dish for talking directly to Earth through NASA’s Deep Space Network.', build(add, M) {
-        add(new CylG(.03, .03, .22, 8), M(STEEL, .7, .4), 0, .11, 0); add(new SphG(.045, 10, 10), M(GOLD, .9, .3), 0, .24, 0); add(new CylG(.17, .17, .025, 28), M(0xdedede, .4, .5), 0, .3, 0, .7, 0, 0); } },
+        add(new CylG(.035, .035, .2, 8), M(0xd6d6cf, .7, .4), 0, .1, 0); add(new BoxG(.08, .07, .12), M(0x5a616b, .6, .4), 0, .22, 0); add(new SphG(.04, 10, 10), M(GOLD, .9, .3), 0, .27, 0);
+        add(new CylG(.15, .15, .03, 24), M(0xe2e2dc, .4, .5), 0, .32, 0, .9, 0, 0); add(new CylG(.12, .12, .032, 24), M(0xc8c8c2, .4, .5), 0, .322, 0, .9, 0, 0); } },
     { id: 'arm', kind: 'arm', spare: true, name: 'Robotic arm', gen: 'Robotic arm', home: V(.8, -.08, 0), dir: V(1, 0, 0), info: 'Carries a microscopic imager, two spectrometers and a Rock Abrasion Tool that grinds into rocks.', build(add, M) {
         add(new BoxG(.1, .12, .16), M(GOLD, .9, .3)); add(new CylG(.028, .028, .42, 8), M(STEEL, .8, .35), .06, -.02, .2, PIE / 2, 0, 0);
         add(new SphG(.045, 10, 10), M(0x9aa4ad, .8, .3), .06, -.02, .42); add(new CylG(.028, .028, .36, 8), M(STEEL, .8, .35), .12, -.05, .25, PIE / 2, 0, 0);
@@ -216,32 +243,32 @@ const MISSIONS = [
 const RECLAIM = {
   a15: { body: 'MOON', word: 'Curiosity', repairs: ['a15_steer'],
     intro: 'In 2075, Project RECLAIM lands you at Hadley–Apennine, where the first rover ever driven by astronauts has stood since 1971. On its very first drive in real history, its front steering stopped responding. Use your hands to diagnose the steering, then take the rover on one more science drive to the places that made it famous.',
-    task: 'Diagnose the steering fault, then drive to three sampling sites and back to your rocket.',
-    drive: { type: 'checkpoints', vehicle: 'ride', checkpoints: [
+    task: 'Diagnose the steering fault, then drive to three sampling sites (any order), collect a sample at each and return to your rocket.',
+    drive: { type: 'checkpoints', vehicle: 'ride', title: 'Science drive', checkpoints: [
       { name: 'Hadley Rille (the Elbow)', fact: 'Hadley Rille is a winding channel more than a kilometre wide and hundreds of metres deep, probably carved by flowing lava. Scott and Irwin sampled its rim on their first drive.' },
       { name: 'St. George crater', fact: 'On the slope of Mount Hadley Delta the crew collected breccias: rocks shattered by impacts and welded back together, which record the Moon’s violent early history.' },
       { name: 'Spur crater', fact: 'At Spur crater the crew found a white, crystal-rich rock nicknamed the Genesis Rock (sample 15415): anorthosite from the Moon’s ancient crust, about 4 billion years old.' }] },
     done2075: 'Samples collected and the crew safely back at the rocket.', real: 'In reality the rover has not moved since 1971. Over three moonwalks it carried Scott and Irwin about 28 km.' },
   a17: { body: 'MOON', word: 'Ingenuity', repairs: ['a17_dust', 'a17_fender'],
     intro: 'In 2075, Project RECLAIM reaches Taurus–Littrow, where the last rover driven on the Moon still wears its famous home-made fender. Find out why one small broken piece caused so much trouble in 1972 and rebuild the fix yourself. A fictional emergency call is about to put it to the test.',
-    task: 'Rebuild the map-and-tape fender, then rush supplies to a stranded crew member before time runs out.',
-    drive: { type: 'rescue', vehicle: 'ride', time: 90, call: 'RECLAIM-2 to all units (fictional, 2075): geologist Dr Ana Ruiz is stranded near the South Massif with a failed rover battery. Bring her the spare battery and water before her reserve runs low.',
+    task: 'Rebuild the map-and-tape fender, then rush a spare battery to a stranded geologist and connect it before her reserve runs out.',
+    drive: { type: 'rescue', vehicle: 'ride', time: 90, title: 'Emergency battery run', call: 'RECLAIM-2 to all units (fictional, 2075): geologist Dr Ana Ruiz is stranded near the South Massif with a failed rover battery. Bring her the spare battery before her reserve runs low.',
       facts: [['Lunar dust', 'Without its fender, the rover threw a "rooster tail" of dust over the crew. Dark dust soaks up sunlight, so dusty suits and equipment can overheat.'],
         ['The longest drives', 'Cernan and Schmitt drove about 36 km in the Taurus–Littrow valley, the longest total distance of any Apollo rover.'],
         ['Teamwork across 380,000 km', 'The map-and-tape fender was worked out overnight on Earth by astronaut John Young and engineers, then read up to the crew by radio.']] },
     done2075: 'Supplies delivered and everyone back safely, thanks to a fender made from maps.', real: 'In reality the map fender lasted for the rest of Apollo 17. The rover was parked near the landing site, where it remains.' },
   spirit: { body: 'MARS', word: 'Perseverance', repairs: ['spirit_wheel'],
-    intro: 'In 2075, Project RECLAIM reaches Spirit, still stuck at Troy in Gusev Crater where it fell silent in 2010. Spirit is far too small to ride, so you will drive it by remote control. First find out why its right-front wheel died, then try to steer it out of the soft soil to a sunnier slope.',
-    task: 'Investigate the dead wheel, then drive Spirit by remote control out of the soft soil to safe, sunny ground.',
-    drive: { type: 'escape', vehicle: 'remote', facts: [
+    intro: 'In 2075, Project RECLAIM reaches Spirit, still stuck at Troy in Gusev Crater where it fell silent in 2010. Spirit is far too small to ride, so you will drive it by remote control. First find out why its right-front wheel died. The wheel cannot be fixed, but a portable power pack gives Spirit enough charge for one short remote-controlled drive, out of the soft soil to a north-facing slope where its tilted panels can catch the low winter Sun.',
+    task: 'Investigate the dead wheel, then drive Spirit by remote control onto a north-facing slope, where its tilted panels make enough power to survive the winter. Spinning wheels in sand waste power, so drive gently.',
+    drive: { type: 'escape', vehicle: 'remote', title: 'Winter refuge', facts: [
       ['Home Plate', 'Nearby Home Plate is a layered plateau made by an explosive volcanic eruption, possibly involving water.'],
       ['Silica soil', 'The bright soil Spirit dug up with its dead wheel is about 90% silica, a sign of ancient hot springs or steam vents.'],
       ['Winter sunlight', 'In winter Spirit needed a slope tilted toward the north to catch enough sunlight. At Troy it could not reach one.']] },
-    done2075: 'Spirit is out of the soft soil and on a sunny slope.', real: 'This rescue is fiction. The real Spirit never escaped Troy and last communicated on 22 March 2010.' },
+    done2075: 'Spirit is out of the soft soil and parked on a north-facing slope. The wheel is still broken, but its tilted panels now catch enough winter sunlight to power its heaters.', real: 'This rescue is fiction. The real Spirit never escaped Troy and last communicated on 22 March 2010.' },
   opportunity: { body: 'MARS', word: 'Legacy', repairs: ['opp_storm', 'opp_energy'],
     intro: 'In 2075, Project RECLAIM reaches Perseverance Valley on the rim of Endeavour Crater, where Opportunity fell silent during the great dust storm of 2018. Relive how the storm drained its power, then drive it by remote control to a ridge with a clear view of Earth and send one last science report, on a limited battery.',
     task: 'Relive the 2018 power crisis, then reach the signal ridge and transmit before the battery runs out.',
-    drive: { type: 'signal', vehicle: 'remote', facts: [
+    drive: { type: 'signal', vehicle: 'remote', title: 'The last report', facts: [
       ['Blueberries', 'Opportunity found small round "blueberries" of the mineral hematite, which on Earth usually forms in water.'],
       ['Endeavour Crater', 'Endeavour Crater is about 22 km wide. Opportunity spent its last seven years exploring its rim.'],
       ['Marathon rover', 'Opportunity drove about 45 km in total, an off-Earth driving record at the time.']] },

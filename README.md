@@ -12,10 +12,10 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 
 | Mission | Real history you act out | 2075 drive (fiction) |
 |---|---|---|
-| **Apollo 15 LRV** · Hadley–Apennine, Moon, 1971 | Front steering did not respond on the first drive; troubleshooting did not fix it; it worked again on the second moonwalk (cause never confirmed) | Science drive to Hadley Rille, St. George crater and Spur crater (Genesis Rock), then back to the rocket |
-| **Apollo 17 LRV** · Taurus–Littrow, Moon, 1972 | Broken right-rear fender extension: the dust "rooster tail", the tape that would not stick, the four-map fender with clamps | Emergency supply run against a timer |
-| **Spirit** · Gusev Crater, Mars, 2004–2010 | Right-front wheel motor failure, and the silica soil its dragging wheel uncovered | Remote-control escape from soft soil, with wheel slip and sinkage |
-| **Opportunity** · Endeavour Crater, Mars, 2004–2018 | The 2018 planet-wide dust storm and the power decisions it forced | Remote-control drive to a signal ridge on a limited battery |
+| **Apollo 15 LRV** · Hadley–Apennine, Moon, 1971 | Front steering did not respond on the first drive; troubleshooting did not fix it; it worked again on the second moonwalk (cause never confirmed) | Science drive to Hadley Rille, St. George crater and Spur crater in any order, picking the right rock at each sampling stop, then back to the rocket |
+| **Apollo 17 LRV** · Taurus–Littrow, Moon, 1972 | Broken right-rear fender extension: the dust "rooster tail", the tape that would not stick, the four-map fender with clamps | Emergency run against a timer to a stranded geologist; climb off, carry the spare battery and connect it |
+| **Spirit** · Gusev Crater, Mars, 2004–2010 | Right-front wheel motor failure, and the silica soil its dragging wheel uncovered | Remote-control drive out of soft soil onto a north-facing slope (tilted panels catch the winter Sun), with wheel slip, sinkage, a power budget and the silica trail left by the dead wheel |
+| **Opportunity** · Endeavour Crater, Mars, 2004–2018 | The 2018 planet-wide dust storm and the power decisions it forced | Remote-control drive to a signal ridge on a limited battery (in the repair bay: free choice of systems in the storm, and a Give Up option that reveals what really happened) |
 
 ## Game flow
 
@@ -29,11 +29,13 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 | `story.html` | Rocket travel, third-person astronaut, shared driving system, four drive missions, ending |
 | `repair.html` | The hand-tracked repair bay (formerly v8). Opened with `?story=1&mission=…` it runs only that mission's repairs and returns to the story; opened on its own it is free play with all repairs |
 | `shared/models.js` | Rover 3D models, NASA mission history, and the 2075 story data, used by all three pages |
+| `shared/voice.js` | Spoken lines with typed, disappearing subtitles and a mute button. Plays `audio/vo/*.mp3` when present, otherwise the browser's speech voice |
+| `VOICEOVER.md`, `audio/vo/`, `tools/` | Voiceover scripts (`lines.csv`) and how to record them with VoiceStudio |
 | `drafts/` | Earlier versions (v6, v7) |
 
 ## Controls
 
-- **Repairs:** webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse.
+- **Repairs:** you choose at the first repair (with "Never ask again" / "Ask again"); scroll to zoom. Webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse.
 - **Walking:** WASD, Shift to run, drag the mouse to look, E to interact.
 - **Driving:** W/S, A/D, Shift for slow and careful, E to interact.
 
@@ -54,3 +56,4 @@ then open http://localhost:8000. Camera video is processed in the browser and ne
 - Hand-landmark smoothing uses the One Euro filter (Casiez, Roussel & Vogel, CHI 2012), an idea taken from [open-source-hands](https://github.com/abouchedidxcode/open-source-hands) (MIT); the implementation here is our own.
 - Driving feel and chase camera were informed by mrdoob's [Starter Kit Racing](https://github.com/mrdoob/Starter-Kit-Racing) (MIT); no code was copied.
 - 3D models are simplified illustrations built in code, not to scale.
+- The first draft of the Opportunity storm power model was written by an external model (NVIDIA Nemotron 3 Ultra, through OpenRouter), then reviewed and corrected.

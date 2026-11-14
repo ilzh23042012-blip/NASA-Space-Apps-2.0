@@ -17,8 +17,8 @@
   #overlay p { margin:0; opacity:.9; }
   #overlay ul { margin:0; padding:0; list-style:none; opacity:.75; font-size:.92rem; }
   #overlay .note { font-size:.85rem; opacity:.65; }
-  #story { z-index:8; display:none; background:rgba(3,5,9,.5); }
-  #story .card { max-width:780px; width:100%; max-height:calc(100vh - 40px); overflow:auto; background:rgba(6,10,18,.95); border:1px solid rgba(70,217,255,.4); border-radius:10px; padding:22px 26px; box-shadow:0 0 40px rgba(0,0,0,.6); line-height:1.55; }
+  #story { z-index:8; display:none; background:rgba(3,5,9,.5); justify-content:flex-start !important; padding-top:max(16px, 5vh) !important; }
+  #story .card { box-sizing:border-box; max-width:780px; width:100%; max-height:calc(100vh - 5vh - 230px); overflow:auto; background:rgba(6,10,18,.95); border:1px solid rgba(70,217,255,.4); border-radius:10px; padding:22px 26px; box-shadow:0 0 40px rgba(0,0,0,.6); line-height:1.55; }
   #story h2 { margin:.2em 0 .1em; font-weight:500; font-size:1.6rem; }
   #story h3 { margin:1em 0 .3em; color:var(--cyan); font-size:1rem; letter-spacing:.04em; text-transform:uppercase; }
   #story p { margin:.4em 0; }
@@ -59,6 +59,10 @@
     <button id="mouse" class="hbtn sec">Play with mouse</button>
   </div>
   <p class="note">The camera needs your permission and a secure page (https:// or localhost). Video is processed only in your browser and is never uploaded.</p>
+  <div id="askRow" style="display:none;gap:18px;flex-wrap:wrap;justify-content:center;font-size:.92rem">
+    <label><input type="radio" name="ask" value="ask" checked> Ask again next time</label>
+    <label><input type="radio" name="ask" value="never"> Never ask again (use this choice every time)</label>
+  </div>
   <div id="msg" role="status"></div>
 </div>
 <div id="story" role="dialog" aria-modal="true"></div>
@@ -68,6 +72,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
 <script src="shared/models.js"></script>
+<script src="shared/voice.js"></script>
 <script>
 
 /* ================= repair-bay recipes ================= */
@@ -104,8 +109,13 @@ const RECIPES = {
     extra(b) { b.spinPiv = pivotOf(b, m => m.userData.spin, V(0, 0, 0)); },
     dust: [{ at: [-.8, -.326, 0], size: [1.2, .5], rot: [-PIE / 2, 0, 0], sand: true }],
     steps: [
-      { t: 'motortest', short: 'Command the motor', text: 'Twist or circle the wheel to command its motor. Does it turn?' },
-      { t: 'wipe', short: 'Drag the wheel', text: 'Drive backwards: drag the dead wheel through the soil to dig a trench', goal: .8, gauge: p => 'Bright soil exposed ' + Math.round(100 * p) + '%', done: 'Bright white soil: almost pure silica!' }] },
+      { t: 'motortest', short: 'Send a drive command', text: 'Send drive commands and compare the motor current with what the wheel does' },
+      { t: 'choice', short: 'Choose a workaround', text: 'The motor is dead and nobody can reach Mars. Choose what the team should do',
+        q: 'The right-front drive motor has failed for good. What should the team do?',
+        opts: [['Wait for the motor to fix itself', 'Motors do not heal. Since 2004 the team had already rested it and driven backwards to spread its lubricant.'],
+          ['Send a robot to swap the wheel', 'No robot or person could reach Spirit. On Mars, every fix has to be done with software and driving tricks.'],
+          ['Drive backwards, dragging the dead wheel', null, 'Spirit drove backwards, so its five working wheels pulled the dead one behind them.']] },
+      { t: 'wipe', short: 'Drag the dead wheel', text: 'Spirit drives backwards: rub along the soil strip behind the wheel to drag it through the ground', goal: .8, gauge: p => 'Trench dug ' + Math.round(100 * p) + '%', done: 'Bright white soil: almost pure silica!' }] },
   mer_wheel: { unitDef: () => merWheelUnit, scale: 3.5, rot: [-.18, .5, 0], pos: [-.5, 0],
     mount(add, M) {
       add(new CylG(.2, .2, .04, 24), M(0x9aa4ad, .85, .3), 0, 0, 0, PIE / 2, 0, 0);
@@ -155,7 +165,8 @@ const HINTS = {
   dusttest: ['Pinch the wheel and twist, or circle it with your fingertip, to drive', 'Circle the wheel with the mouse pointer to drive'],
   assemble: ['Pinch a piece, carry it and open your fingers on the right spot', 'Drag each piece to the right spot'],
   tape: ['With both hands up, the string between your index fingers is the tape. Stretch it over a seam, line it up and hold still', 'Press on one end of a glowing seam and drag to the other end'],
-  motortest: ['Pinch the wheel and twist, or circle it with a fingertip', 'Circle the wheel with the mouse pointer'],
+  motortest: ['Point at "Send drive command" and hold, or pinch it', 'Click "Send drive command"'],
+  choice: ['Point at an answer and hold, or pinch it', 'Click an answer'],
   traction: ['Point and hold (or pinch) a direction, pinch-drag the speed slider, then press Try drive', 'Click a direction, drag the speed slider, then click Try drive'],
   storm: ['Pinch the timeline slider and move it right. Pinch the camera button to photograph the Sun', 'Drag the timeline slider and click the camera button'],
   energy: ['Flip systems on or off at any time, and press Run storm', 'Click systems on or off, and click Run storm'],
@@ -284,11 +295,23 @@ function startMouse() {
 document.getElementById('start').addEventListener('click', start);
 document.getElementById('mouse').addEventListener('click', startMouse);
 addEventListener('pointerdown', () => { if (ac && ac.state === 'suspended') ac.resume(); });
-// story mode: reuse the input the player chose last time (camera permission is remembered by the browser on https)
+// story mode: ask how the player wants to control the repairs; "Never ask again" reuses that choice on every later repair
+const saveAsk = () => { const r = document.querySelector('input[name="ask"]:checked'); try { localStorage.setItem('reclaimAsk', r ? r.value : 'ask'); } catch (e) {} };
+VO.init({ bottom: 104, mute: { left: '14px', bottom: '14px' } });
+/* mouse wheel zooms: the held rover in the main view, the camera in the repair bay */
+addEventListener('wheel', e => {
+  if (!started || G.panel || (e.target && e.target.closest && e.target.closest('#story, #bar, #overlay'))) return; const k = Math.exp(-Math.sign(e.deltaY) * .1);
+  if (G.mode === 'bench') { bcam.zoom = clamp(bcam.zoom * k, .7, 2.2); bcam.updateProjectionMatrix(); } else if (G.mode === 'main') G.zoom = clamp((G.zoom || 1) * k, .6, 1.8);
+}, { passive: true });
+document.getElementById('start').addEventListener('click', saveAsk); document.getElementById('mouse').addEventListener('click', saveAsk);
 if (STORY) addEventListener('load', () => setTimeout(() => {
   document.querySelector('#overlay h1').textContent = 'Project RECLAIM · Repair bay';
-  let pref = null; try { pref = localStorage.getItem('reclaimInput'); } catch (e) {}
-  if (pref === 'mouse') startMouse(); else if (pref === 'camera') start();
+  let pref = null, ask = 'ask'; try { pref = localStorage.getItem('reclaimInput'); ask = localStorage.getItem('reclaimAsk') || 'ask'; } catch (e) {}
+  if (ask === 'never' && pref === 'mouse') return startMouse();
+  if (ask === 'never' && pref === 'camera') return start();
+  document.querySelector('#overlay > p').textContent = 'How would you like to do the repairs? Use hand gestures (your webcam tracks your hands), or the mouse.';
+  document.getElementById('start').textContent = '✋ Hand gestures (camera)'; document.getElementById('mouse').textContent = '🖱 Mouse';
+  document.getElementById('askRow').style.display = 'flex';
 }, 60));
 
 /* ================= story panels (DOM, usable by hand or mouse) ================= */
@@ -344,6 +367,16 @@ const ACT = {
   lock() { setLock(!G.locked); },
   storyDone() { hidePanel(); setProgress(STORY_ID + '_repair'); G.black = 1; toStory('drive'); },
   leave() { hidePanel(); toStory('rover'); },
+  // Opportunity: retry the power plan, or give up and learn why the real rover could not be saved
+  oppAgain() { hidePanel(); const st = B && B.steps[B.si]; if (st) { st.run = false; st.k = 0; st.res = null; } toast('Change which systems are on, then run the storm again'); },
+  oppGiveUp() { VO.say('opp_giveup'); showPanel('<span class="badge" style="color:#5dff9e">REAL NASA HISTORY</span><h2>Why Opportunity could not be saved</h2>' +
+    '<p>On 10 June 2018 the sky over Perseverance Valley grew darker than any Mars rover had ever measured (tau about 10.8). Opportunity’s battery ran low and its software shut down everything except its mission clock, which was meant to wake it once the sky cleared. It never answered again.</p>' +
+    '<ul><li>No setting chosen on Earth could have helped: the rover was already in a low-power fault, and the team could not send commands it would hear.</li>' +
+    '<li>After the storm NASA sent more than 1,000 recovery commands and listened through the windy season, hoping a gust would blow dust off the panels. It never did.</li>' +
+    '<li>Engineers think dust stayed on the solar panels. The rover may also have suffered a mission clock fault, so it might not have known when to wake up, and the deep cold could have damaged its battery.</li>' +
+    '<li>NASA declared the mission complete on 13 February 2019, after almost 15 years and more than 45 km.</li></ul>' +
+    '<div class="row"><button class="hbtn primary" data-act="oppDone">Continue</button></div>'); },
+  oppDone() { hidePanel(); const st = B && B.steps[B.si]; if (st) st.finished = true; },
 };
 document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && !el.disabled && ACT[el.dataset.act]) { if (!ac) try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (er) {} ACT[el.dataset.act](el); } });
 function setBar() {
@@ -606,7 +639,7 @@ function updatePose(dt, w, h, hi, hv) {
   tmpV.set(T.cx / w * 2 - 1, -(T.cy / h) * 2 + 1, .5).unproject(cam).sub(cam.position).normalize().multiplyScalar(6).add(cam.position);
   rover.g.position.lerp(tmpV, ek(16)); rover.yaw += (T.yt - rover.yaw) * ek(10);
   rover.roll += (T.roll - rover.roll) * ek(12); rover.pitch += (T.pitch - rover.pitch) * ek(10); rover.ex += (ex - rover.ex) * ek(8); rover.s += (T.s - rover.s) * ek(10);
-  rover.g.rotation.set(rover.pitch, rover.yaw, rover.roll); rover.g.scale.setScalar(rover.s * rover.C.k);
+  rover.g.rotation.set(rover.pitch, rover.yaw, rover.roll); rover.g.scale.setScalar(rover.s * rover.C.k * (G.zoom || 1));
 }
 
 /* ---- parts: explode, live behaviour, guidance glow ---- */
@@ -682,6 +715,7 @@ function zoomStep(now) {
 }
 function openBench(p, task, now) {
   Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0);
+  bcam.zoom = 1; bcam.updateProjectionMatrix();
   B = task.bench || (task.bench = makeBench(p, task, now)); bscene.add(B.root); layoutBench(B); B.openT = now; G.mode = 'bench';
   videoEl.style.opacity = '.14'; glEl.style.background = bayBackground();
   TS.forEach(S => { S.drag = null; S.tk = null; S.wl = []; S.swKey = null; });
@@ -734,6 +768,8 @@ function layoutBench(b) {
 }
 function nextStep(b, now) {
   b.si++; TS.forEach(S => { S.tk = null; if (typeof S.drag === 'string') S.drag = null; }); b.hook = null; b.hookTension = 0; b.tapeOn = null;
+  const vid = b.task.recipe + '_' + (b.si >= b.steps.length ? 'done' : b.si);   // spoken guidance for this step (shared/voice.js)
+  if (VO_LINES[vid]) VO.say(vid);
   if (b.si >= b.steps.length) { b.done = true; b.doneT = now; b.unit.broken = false; arp([523, 659, 784, 1047]); return; }
   const st = b.steps[b.si], fn = STEP[st.t].begin; st.t0 = now; if (fn) fn(b, st, now);
 }
@@ -957,7 +993,7 @@ function sampleLayout(w, h) { const R = mapRect(w, h), bw = (R.w - 40) / 3; retu
 /* ---- Opportunity storm model (approximate values based on NASA reports) ---- */
 const tauAt = v => 1 + 9.8 * Math.pow(v, 1.6);                        // sky opacity over the storm, 30 May -> 10 June 2018
 const powerAt = tau => 645 * Math.exp(-.3375 * (tau - 1));            // watt-hours per sol: ~645 at tau 1, ~22 at tau 10.8
-function stormLayout(w, h) { const R = mapRect(w, h), x = R.x + 20, ww = R.w - 40; return { R, slider: { x, y: R.y + R.h - 50, w: ww, h: 14 }, snap: { id: 'snap', x: R.x + R.w - 220, y: R.y + 20, w: 200, h: 54 } }; }
+function stormLayout(w, h) { const R = mapRect(w, h), x = R.x + 20, ww = R.w - 40; return { R, slider: { x, y: R.y + R.h - 50, w: ww, h: 14 }, snap: { id: 'snap', x: R.x + 10, y: R.y + 222, w: 200, h: 50 } }; }
 function swLayout(st, w, h) {
   const pw = Math.min(st.cx ? 400 : 500, w - 40), x = (st.cx || .5) * w - pw / 2, y = h * (st.y || .3);
   return { x, y, w: pw, rows: st.items.map((it, i) => ({ id: 'sw' + i, it, x, y: y + 54 + i * 44, w: pw, h: 38 })) };
@@ -967,8 +1003,31 @@ function tracLayout(w, h) {
   return { x, y, w: pw, h: 190, modes: [['forward', 'Forward'], ['backward', 'Backward'], ['wiggle', 'Steer side to side']].map(([id, lab], i) => ({ id, lab, x: x + 10 + i * (bw + 10), y: y + 34, w: bw, h: 46 })),
     slider: { x: x + 20, y: y + 112, w: pw - 230, h: 14 }, go: { id: 'go', lab: 'Try drive', x: x + pw - 190, y: y + 96, w: 170, h: 52 } };
 }
-function energyLayout(w, h) { const R = mapRect(w, h), cw = Math.min(330, R.w * .46); return { R, list: { x: R.x, y: R.y, w: cw }, graph: { x: R.x + cw + 20, y: R.y + 10, w: R.w - cw - 20, h: R.h * .62 }, run: { id: 'run', x: R.x + cw + 20, y: R.y + R.h * .62 + 30, w: 190, h: 52 } }; }
-const ENERGY = { cap: 1000, start: 70, sols: 12, list: [['Mission clock', 10, 'The clock is what wakes the rover to check its batteries'], ['Survival heaters', 220], ['Daily radio', 150], ['Science instruments', 120], ['Panoramic camera', 90], ['Robotic arm', 60]] };
+function energyLayout(w, h) { const R = mapRect(w, h), cw = Math.min(310, R.w * .44), gx = R.x + cw + 18, gw = R.w - cw - 18, gh = Math.min(R.h * .58, 250);
+  return { R, list: { x: R.x, y: R.y, w: cw }, graph: { x: gx, y: R.y, w: gw, h: gh }, run: { id: 'run', x: gx, y: R.y + gh + 92, w: 210, h: 50 } }; }
+function choiceLayout(st, w, h) { const pw = Math.min(620, w - 40), x = w >= 900 ? Math.max(392, w / 2 - pw / 2) : w / 2 - pw / 2, oh = 46, ph = 90 + st.opts.length * (oh + 8), y = clamp(h - 200 - ph, 150, h * .4);
+  return { x, y, w: pw, h: ph, opts: st.opts.map((o, i) => ({ id: 'o' + i, x: x + 16, y: y + 80 + i * (oh + 8), w: pw - 32, h: oh })) }; }
+const ENERGY = { cap: 1000, start: 70, sols: 12, list: [['clock', 'Mission clock', 10], ['heaters', 'Survival heaters', 220], ['radio', 'Daily radio contact', 150], ['science', 'Science instruments', 120], ['pancam', 'Panoramic camera', 90], ['arm', 'Robotic arm', 60]] };
+/* Opportunity storm survival model (simplified game values). First draft written by an external model (Nemotron 3 Ultra via OpenRouter), reviewed and corrected here. */
+function simulateOppStorm(on) {
+  const P = Object.fromEntries(ENERGY.list.map(([k, , w]) => [k, w])), log = []; let batt = ENERGY.start, fault = false, faultSol = null, coldNights = 0;
+  for (let sol = 0; sol < ENERGY.sols; sol++) {
+    const tau = 2 + 8.8 * sol / (ENERGY.sols - 1), solar = powerAt(tau), load = fault ? 0 : Object.keys(P).reduce((s, k) => s + (on[k] ? P[k] : 0), 0);
+    batt = clamp(batt + (solar - load) / ENERGY.cap * 100, 0, 100); const temp = -46 + (on.heaters && !fault ? 18 : 0) + 9 * Math.min(1, tau / 8);
+    if (temp < -40) coldNights++; log.push({ sol, tau, solar, load, batt, temp });
+    if (batt <= 0 && !fault) { fault = true; faultSol = sol; }
+  }
+  const verdict = fault ? 'fault' : !on.clock ? 'silent' : coldNights >= 4 ? 'cold' : 'survived', fb = [];
+  const big = ENERGY.list.filter(([k]) => on[k] && k !== 'clock').sort((a, b) => b[2] - a[2]);
+  if (big.length) fb.push('Biggest drains left on: ' + big.slice(0, 3).map(x => x[1].toLowerCase() + ' (' + x[2] + ' Wh)').join(', ') + '. By the storm’s peak the panels made only about 22 Wh per sol.');
+  else fb.push('You cut the load to the bare minimum, about what Opportunity’s own fault protection did.');
+  fb.push(on.heaters ? 'Heaters kept the electronics warmer, but at 220 Wh per sol they cost more than the panels could make once the sky darkened.' : 'Heaters off saved a lot of energy, but ' + coldNights + ' nights fell below −40 °C, which risks damaging the battery. Dusty skies did trap a little heat.');
+  if (!on.clock) fb.push('With the mission clock off, the rover could never wake itself to check its battery or listen for Earth. It would stay silent even with power.');
+  if (on.radio) fb.push('Daily radio contact kept Earth informed, but at 150 Wh per sol it was one of the most expensive choices.');
+  fb.push(verdict === 'fault' ? 'The battery ran flat on sol ' + (faultSol + 1) + ': a low-power fault, as happened to the real rover on 10 June 2018.' : verdict === 'silent' ? 'Power survived, but nobody could reach the rover.' : verdict === 'cold' ? 'It reached the storm’s peak with ' + Math.round(batt) + '% battery, but the repeated deep cold could have harmed it.' : 'In this simplified model it reached the storm’s peak with ' + Math.round(batt) + '% battery.');
+  return { log, fault, faultSol, coldNights, finalBatt: batt, verdict, feedback: fb };
+}
+const VERDICT = { fault: ['LOW-POWER FAULT', '#ff6b5a'], silent: ['ALIVE BUT SILENT', '#ff9a3c'], cold: ['SURVIVED, BUT FROZEN', '#46d9ff'], survived: ['REACHED THE PEAK', '#5dff9e'] };
 function commLayout(w, h) { const R = mapRect(w, h); return { R, slider: { x: R.x + 20, y: R.y + R.h - 40, w: R.w - 40, h: 14 }, tx: { id: 'tx', x: R.x + 20, y: R.y + R.h - 120, w: 200, h: 52 }, hypo: { id: 'hypo', x: R.x + 240, y: R.y + R.h - 120, w: 250, h: 52 }, fin: { id: 'fin', x: R.x + R.w - 200, y: R.y + R.h - 120, w: 180, h: 52 } }; }
 
 const STEP = {
@@ -1197,19 +1256,28 @@ const STEP = {
         if (st.fail) {   // dust stops the tape sticking: it peels off and drops away
           m.material.transparent = true; let t = 0;
           b.tw.push(() => { t += .016; if (t > .9) { m.position.y -= .012; m.rotation.z += .06; m.material.opacity = Math.max(0, 1 - (t - .9) * 1.2); } if (t > 1.8) { P.remove(m); return true; } return false; });
-          toast('The tape will not stick to the dusty fender. In 1972 the piece fell off again during the drive.'); beep(200, .25, 'square', .05, .9);
+          toast('The tape will not stick to the dusty fender. In 1972 the piece fell off again during the drive.'); beep(200, .25, 'square', .05, .9); VO.say('a17_fender_tapefail');
         } else toast('Seam taped');
       }
       return st.seams.every(s => s.done);
     } },
-  motortest: { short: 'Command the motor',
-    begin(b, st) { st.cmd = 0; st.cur = 0; },
-    update(b, st, ptrs, dt, now) {
-      const c = hproj(b, 0, 0, 0); st.c = c; let d = 0; const tg = [{ key: 'mt', x: c.x, y: c.y }];
-      turnTargets(tg, ptrs, 150, (t, dd2) => { d += dd2; }); st.act = tg.act;
-      st.cmd += Math.abs(d); st.cur += (Math.min(1, Math.abs(d) * 25) - st.cur) * .2; b.spinPiv.rotation.z = Math.sin(now / 30) * .012 * st.cur;
-      if (st.cur > .3 && (now / 400 | 0) !== st.tk2) { st.tk2 = now / 400 | 0; beep(90, .1, 'sawtooth', .03); }
-      if (st.cmd >= 7) { toast('The motor gets power but the wheel does not turn: the drive motor has failed'); return true; }
+  motortest: { short: 'Command the motor',   // press a button to send a drive command; the motor draws current but the wheel never turns
+    begin(b, st) { st.cmd = 0; st.cur = 0; st.run = 0; st.n = 0; },
+    update(b, st, ptrs, dt, now, w, h) {
+      st.btn = { id: 'cmd', x: w - 354, y: 252, w: 330, h: 56, disabled: st.run > 0 }; st.c = hproj(b, 0, 0, 0);
+      if (uiHit(ptrs, [st.btn], now, dt) === 'cmd') { st.run = 2.4; st.n++; st.cmd = 0; beep(660, .06); }
+      if (st.run > 0) {
+        st.run -= dt; st.cmd = Math.min(1, st.cmd + dt / 2.2); st.cur += (Math.min(1, .55 + st.cmd * .45) - st.cur) * .1; b.spinPiv.rotation.z = Math.sin(now / 30) * .01;
+        if ((now / 380 | 0) !== st.tk2) { st.tk2 = now / 380 | 0; beep(90, .1, 'sawtooth', .03); }
+        if (st.run <= 0) { b.spinPiv.rotation.z = 0; toast(st.n < 2 ? 'Current flowed, but the wheel did not move at all. Send one more command to be sure.' : 'Diagnosis: the motor gets power but the wheel does not turn. The drive motor has failed.'); }
+      } else st.cur *= .92;
+      return st.n >= 2 && st.run <= 0;
+    } },
+  choice: { short: 'Decide',   // multiple choice: wrong answers explain why they would not work
+    begin(b, st) { st.wrong = new Set(); },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = choiceLayout(st, w, h), id = uiHit(ptrs, L.opts.filter(o => !st.wrong.has(o.id)), now, dt);
+      if (id) { const o = st.opts[+id.slice(1)]; if (o[1]) { st.wrong.add(id); err('Not that: ' + o[1]); } else { toast('Correct. ' + o[2]); return true; } }
       return false;
     } },
   traction: { short: 'Try escape moves',
@@ -1249,36 +1317,33 @@ const STEP = {
       if (Math.abs(G.storm - st.v) > .02) { G.storm = st.v; glEl.style.background = bayBackground(); }
       return st.v > .97 && st.reads.length >= 3;
     } },
-  energy: { short: 'Manage the energy',
-    begin(b, st) { st.items = ENERGY.list.map(([lab, wh, keep]) => ({ lab, w: wh, keep, on: true })); st.sol = 0; st.batt = ENERGY.start; st.run = false; st.log = []; st.cold = 0; st.clk = 0; st.over = false; },
+  energy: { short: 'Manage the energy',   // free choice of systems; every combination is simulated and explained; finish by giving up
+    begin(b, st) { st.items = ENERGY.list.map(([key, lab, wh]) => ({ key, lab, w: wh, on: true })); st.run = false; st.res = null; st.k = 0; st.tries = 0; st.finished = false; },
     update(b, st, ptrs, dt, now, w, h) {
-      const L = energyLayout(w, h), rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 30 + i * 44, w: L.list.w, h: 38 }));
-      const id = uiHit(ptrs, st.over ? [] : [...rows, ...(st.run ? [] : [L.run])], now, dt);
-      if (id === 'run') { st.run = true; beep(660, .08); }
-      else if (id) { const it = st.items[+id.slice(2)]; if (it.on && it.keep) err('Keep it on: ' + it.keep); else { it.on = !it.on; beep(it.on ? 700 : 400, .07, 'square', .05); } }
-      if (st.run && !st.over) {
-        st.clk += dt;
-        if (st.clk > 1.2) {
-          st.clk = 0; const tau = 2 + 8.8 * st.sol / (ENERGY.sols - 1), solar = powerAt(tau), load = st.items.reduce((a, it) => a + (it.on ? it.w : 0), 0), heat = st.items[1].on;
-          st.batt = clamp(st.batt + (solar - load) / ENERGY.cap * 100, 0, 100); const temp = -46 + (heat ? 18 : 0) + 9 * Math.min(1, tau / 8);
-          if (temp < -40) st.cold++; st.log.push({ tau, solar, load, batt: st.batt, temp }); st.sol++; beep(st.batt > 20 ? 500 : 250, .05);
-          if (st.batt <= 0 || st.sol >= ENERGY.sols) { st.over = true; st.fault = st.batt <= 0; st.endT = now;
-            toast(st.fault ? 'Low-power fault: the rover shut itself down. This is what really happened on 10 June 2018.' : 'You reached the storm’s peak with ' + Math.round(st.batt) + '% battery and ' + st.cold + ' cold warnings (simplified model).'); }
-        }
+      const L = energyLayout(w, h), rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 34 + i * 48, w: L.list.w, h: 44 }));
+      const id = uiHit(ptrs, st.run ? [] : [...rows, L.run], now, dt);
+      if (id === 'run') { st.res = simulateOppStorm(Object.fromEntries(st.items.map(it => [it.key, it.on]))); st.run = true; st.k = 0; st.tries++; beep(660, .08); }
+      else if (id) { const it = st.items[+id.slice(2)]; it.on = !it.on; beep(it.on ? 700 : 400, .07, 'square', .05); }
+      if (st.run && st.k < ENERGY.sols) {
+        const k0 = st.k; st.k = Math.min(ENERGY.sols, st.k + dt * 1.6); if ((st.k | 0) !== (k0 | 0)) beep(st.res.log[Math.min(ENERGY.sols - 1, st.k | 0)].batt > 20 ? 500 : 250, .05);
+        if (st.k >= ENERGY.sols) { const r = st.res, v = VERDICT[r.verdict];
+          showPanel('<span class="badge" style="color:' + v[1] + '">' + v[0] + '</span><h2>Your power plan, run ' + st.tries + '</h2><p class="meta">On: ' + esc(st.items.filter(i => i.on).map(i => i.lab).join(', ') || 'nothing') + '</p>' +
+            '<ul>' + r.feedback.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul><p class="small">Simplified model with game values, based on NASA’s reported power levels.</p>' +
+            '<div class="row"><button class="hbtn primary" data-act="oppAgain">Try another combination</button><button class="hbtn sec" data-act="oppGiveUp">Give up</button></div>'); }
       }
-      return st.over && now - st.endT > 3500;
+      return st.finished;
     } },
   comm: { short: 'Try to make contact',
     begin(b, st) { st.v = 0; st.tries = 0; st.phase = 'idle'; st.clk = 0; st.hypo = false; st.reply = false; st.finish = false; G.storm = 1; },
     update(b, st, ptrs, dt, now, w, h) {
       const L = commLayout(w, h); if (st.phase === 'idle') st.v = uiSlider(ptrs, L.slider, st.v, now, 'month');
       const clear = st.v > .55, s2 = 1 - st.v * .85; if (Math.abs(G.storm - s2) > .02) { G.storm = s2; glEl.style.background = bayBackground(); }
-      const id = uiHit(ptrs, [Object.assign({}, L.tx, { disabled: !clear || st.phase !== 'idle' }), Object.assign({}, L.hypo, { disabled: st.tries < 3 || st.phase !== 'idle' }), Object.assign({}, L.fin, { disabled: st.tries < 3 || st.phase !== 'idle' })], now, dt);
+      const id = uiHit(ptrs, [Object.assign({}, L.tx, { disabled: !clear || st.phase !== 'idle' }), Object.assign({}, L.hypo, { disabled: st.tries < 3 || st.phase !== 'idle' }), Object.assign({}, L.fin, { disabled: st.phase !== 'idle' })], now, dt);
       if (id === 'tx' || id === 'hypo') { st.phase = 'out'; st.clk = 0; st.hypo = id === 'hypo'; st.reply = false; beep(880, .12); beep(1320, .12, 'sine', .06, .12); }
-      if (id === 'fin') { st.finish = true; }
+      if (id === 'fin') ACT.oppGiveUp();
       if (st.phase === 'out') { st.clk += dt; if (st.clk > 2.2) { st.phase = 'wait'; st.clk = 0; } }
       else if (st.phase === 'wait') { st.clk += dt; if (st.clk > 2.6) { st.phase = 'idle'; if (st.hypo) { st.reply = true; arp([523, 784, 1047]); toast('HYPOTHETICAL: a reply! In this imagined case a wind gust cleaned the panels.'); } else { st.tries++; beep(200, .3, 'sine', .05); toast('No reply. Attempt ' + st.tries + '. (NASA sent more than 1,000 commands.)'); } } }
-      return st.finish;
+      return st.finish || st.finished;
     } },
 };
 function setupMaps(b, st) {
@@ -1550,12 +1615,22 @@ const STEP_DRAW = {
     FONT(ctx, 14, 700); ctx.fillStyle = '#fff'; ctx.fillText(st.msg || (H[0] && H[1] ? '' : G.mouseOnly ? 'Drag along the seam from one end to the other' : 'Raise both hands: the string between your index fingers is the tape'), (st.A.x + st.C.x) / 2, Math.max(st.A.y, st.C.y) + 46);
     FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('Seams taped: ' + st.seams.filter(s => s.done).length + ' / ' + st.seams.length, (st.A.x + st.C.x) / 2, Math.max(st.A.y, st.C.y) + 66);
   },
-  motortest(b, st, ctx, now, w) {
-    const c = st.c; if (!c) return; const r = b.S * 70 * .38 + 20;
-    dashRing(ctx, c.x, c.y, r, st.act ? '#ffb000' : 'rgba(255,176,0,.5)', !st.act); progRing(ctx, c.x, c.y, r, st.cmd / 7, 1, '#46d9ff'); turnArrow(ctx, c.x, c.y, r + 14, 1, .8);
-    const x = w - 330, y = 90; panel(ctx, x - 14, y - 30, 314, 130);
-    bar(ctx, x, y, 286, st.cur, st.cur > .5 ? '#ff6b5a' : '#ffb000', 'Motor current (drawing power)'); bar(ctx, x, y + 44, 286, st.cmd / 7, '#46d9ff', 'Commanded: ' + Math.round(st.cmd * 57) + '°');
-    bar(ctx, x, y + 88, 286, 0, '#5dff9e', 'Actual wheel rotation: 0°');
+  motortest(b, st, ctx, now, w, h) {
+    const c = st.c; if (!c || !st.btn) return;
+    if (st.run > 0) { ctx.strokeStyle = 'rgba(255,107,90,' + (.5 + .4 * Math.sin(now / 90)) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(c.x, c.y, b.S * 70 * .4 + 18, 0, PIE * 2); ctx.stroke(); }
+    FONT(ctx, 13, 700); ctx.fillStyle = '#ffb000'; ctx.fillText('RIGHT-FRONT WHEEL', c.x, c.y - b.S * 70 * .4 - 30);
+    const x = w - 340, y = 96; panel(ctx, x - 14, y - 34, 330, 176);
+    bar(ctx, x, y, 300, st.cur, st.cur > .5 ? '#ff6b5a' : '#ffb000', 'Motor current: ' + (st.cur * 2.1).toFixed(1) + ' A (it is getting power)');
+    bar(ctx, x, y + 46, 300, st.cmd, '#46d9ff', 'Wheel should turn: ' + Math.round(st.cmd * 360) + '°');
+    bar(ctx, x, y + 92, 300, 0, '#5dff9e', 'Wheel actually turned: 0°');
+    FONT(ctx, 12, 600); ctx.fillStyle = st.n ? '#ff8a7a' : 'rgba(219,234,242,.7)'; ctx.fillText(st.n ? 'Power in, no movement out: the motor is stalled' : 'Commands sent: 0', x + 150, y + 128);
+    drawBtn(ctx, st.btn, st.run > 0 ? 'Commanding motor…' : '▶ Send drive command (' + st.n + '/2)', { primary: true, disabled: st.run > 0 });
+  },
+  choice(b, st, ctx, now, w, h) {
+    const L = choiceLayout(st, w, h); panel(ctx, L.x, L.y, L.w, L.h);
+    ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('MISSION TEAM DECISION · March 2006', L.x + 16, L.y + 24);
+    FONT(ctx, 15, 600); ctx.fillStyle = '#fff'; wrapLines(ctx, st.q, L.w - 32).forEach((ln, i) => ctx.fillText(ln, L.x + 16, L.y + 50 + i * 20));
+    L.opts.forEach((o, i) => drawBtn(ctx, o, (st.wrong.has(o.id) ? '✗ ' : '') + st.opts[i][0], { disabled: st.wrong.has(o.id) })); ctx.textAlign = 'center';
   },
   traction(b, st, ctx, now, w, h) {
     const L = tracLayout(w, h); panel(ctx, L.x, L.y, L.w, L.h);
@@ -1576,23 +1651,46 @@ const STEP_DRAW = {
     ctx.fillStyle = sky; ctx.fillRect(R.x + 10, R.y + 30, 200, 180); ctx.fillStyle = 'rgba(255,245,220,' + (.15 + .85 * tr).toFixed(2) + ')'; ctx.beginPath(); ctx.arc(sx, sy, sr * (.6 + .4 * tr), 0, PIE * 2); ctx.fill();
     ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SKY ABOVE OPPORTUNITY', R.x + 14, R.y + 22);
     FONT(ctx, 26, 600); ctx.fillStyle = '#fff'; ctx.fillText(date, R.x + 230, R.y + 60); FONT(ctx, 13); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('around sol ' + Math.round(5100 + st.v * 11), R.x + 230, R.y + 82);
-    bar(ctx, R.x + 230, R.y + 120, R.w - 470, tau / 11, '#ff9a3c'); FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.textAlign = 'left'; ctx.fillText('Sky opacity (tau) ' + tau.toFixed(1), R.x + 230, R.y + 112);
-    bar(ctx, R.x + 230, R.y + 170, R.w - 470, pw / 645, pw > 150 ? '#5dff9e' : '#ff6b5a'); ctx.textAlign = 'left'; ctx.fillStyle = '#dbeaf2'; ctx.fillText('Solar energy about ' + Math.round(pw) + ' watt-hours per sol', R.x + 230, R.y + 162);
-    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.75)'; ctx.fillText('Pancam photos of the Sun: ' + st.reads.map(r => 'tau ' + r.tau.toFixed(1)).join(', ') + (st.reads.length < 3 ? '  (take ' + (3 - st.reads.length) + ' more)' : ''), R.x + 14, R.y + 240);
-    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText('Approximate values based on NASA reports: about 645 Wh at the start, about 22 Wh by 10 June.', R.x + 14, R.y + 262);
+    bar(ctx, R.x + 230, R.y + 120, R.w - 250, tau / 11, '#ff9a3c'); FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.textAlign = 'left'; ctx.fillText('Sky opacity (tau) ' + tau.toFixed(1), R.x + 230, R.y + 112);
+    bar(ctx, R.x + 230, R.y + 170, R.w - 250, pw / 645, pw > 150 ? '#5dff9e' : '#ff6b5a'); ctx.textAlign = 'left'; ctx.fillStyle = '#dbeaf2'; ctx.fillText('Solar energy about ' + Math.round(pw) + ' watt-hours per sol', R.x + 230, R.y + 162);
+    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.75)'; ctx.fillText('Pancam photos of the Sun: ' + st.reads.map(r => 'tau ' + r.tau.toFixed(1)).join(', ') + (st.reads.length < 3 ? '  (take ' + (3 - st.reads.length) + ' more)' : ''), R.x + 230, R.y + 240);
+    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.5)'; wrapLines(ctx, 'Approximate values from NASA reports: about 645 Wh at the start, about 22 Wh by 10 June.', R.w - 250).forEach((ln, i) => ctx.fillText(ln, R.x + 230, R.y + 264 + i * 16));
     drawBtn(ctx, L.snap, '📷 Photograph the Sun', { primary: true }); drawSlider(ctx, L.slider, st.v, 'Storm timeline: drag forward', 'sol'); ctx.textAlign = 'center';
   },
   energy(b, st, ctx, now, w, h) {
-    const L = energyLayout(w, h), R = L.R, rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 30 + i * 44, w: L.list.w, h: 38, unit: ' Wh/sol' }));
-    panel(ctx, L.list.x, L.list.y, L.list.w, 40 + rows.length * 44); ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SYSTEMS (energy used per sol)', L.list.x + 14, L.list.y + 20);
-    drawToggleRows(ctx, rows);
-    const Gr = L.graph; panel(ctx, Gr.x, Gr.y, Gr.w, Gr.h); FONT(ctx, 12, 700); ctx.textAlign = 'left'; ctx.fillStyle = '#46d9ff'; ctx.fillText('SUNLIGHT · BATTERY · TEMPERATURE', Gr.x + 12, Gr.y + 20);
-    const n = ENERGY.sols, cw = (Gr.w - 30) / n, base = Gr.y + Gr.h - 24, gh = Gr.h - 60;
-    st.log.forEach((s, i) => { const x = Gr.x + 15 + i * cw; ctx.fillStyle = 'rgba(255,210,74,.55)'; ctx.fillRect(x + 2, base - gh * s.solar / 645, cw * .4, gh * s.solar / 645); ctx.fillStyle = s.temp < -40 ? '#46d9ff' : 'rgba(219,234,242,.4)'; ctx.fillRect(x + cw * .55, base - 6, cw * .35, 6); });
-    ctx.strokeStyle = '#5dff9e'; ctx.lineWidth = 2.5; ctx.beginPath(); [ENERGY.start, ...st.log.map(s => s.batt)].forEach((v, i) => ctx[i ? 'lineTo' : 'moveTo'](Gr.x + 15 + i * cw, base - gh * v / 100)); ctx.stroke();
-    FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('yellow: sunlight · green: battery ' + Math.round(st.batt) + '% · blue marks: below −40 °C (' + st.cold + ')', Gr.x + 12, Gr.y + Gr.h - 6);
+    const L = energyLayout(w, h), R = L.R, rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 34 + i * 48, w: L.list.w, h: 44 }));
+    const load = st.items.reduce((a, it) => a + (it.on ? it.w : 0), 0);
+    panel(ctx, L.list.x, L.list.y, L.list.w, 44 + rows.length * 48); ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SYSTEMS · load ' + load + ' Wh per sol', L.list.x + 14, L.list.y + 22);
+    for (const r of rows) {   // name on the first line, energy use on the second, switch on the right: nothing overlaps
+      const it = r.it, hot = TS.some(S => S.swKey === r.id); ctx.fillStyle = hot ? 'rgba(70,217,255,.14)' : 'rgba(255,255,255,.04)'; ctx.fillRect(r.x + 8, r.y, r.w - 16, r.h);
+      FONT(ctx, 13, 600); ctx.fillStyle = it.on ? '#dbeaf2' : 'rgba(219,234,242,.45)'; ctx.fillText(it.lab, r.x + 18, r.y + 19);
+      FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.55)'; ctx.fillText('uses ' + it.w + ' Wh per sol', r.x + 18, r.y + 35);
+      const tx = r.x + r.w - 72, ty = r.y + 12; ctx.fillStyle = it.on ? '#5dff9e' : '#4a4f57'; ctx.fillRect(tx, ty, 52, 20); ctx.fillStyle = '#fff'; ctx.fillRect(it.on ? tx + 30 : tx + 2, ty + 2, 20, 16);
+      FONT(ctx, 10, 700); if (it.on) { ctx.fillStyle = '#0b0d10'; ctx.fillText('ON', tx + 6, ty + 14); } else { ctx.fillStyle = '#dbeaf2'; ctx.fillText('OFF', tx + 26, ty + 14); }
+      const hp = holdOf(r.id); if (hp > 0) { ctx.fillStyle = 'rgba(255,176,0,.6)'; ctx.fillRect(r.x + 8, r.y + r.h - 3, (r.w - 16) * Math.min(1, hp), 3); }
+    }
+    // graph: smooth sunlight area and battery curve, drawn up to the current sol
+    const Gr = L.graph, n = ENERGY.sols, px = Gr.x + 44, pw = Gr.w - 62, top = Gr.y + 34, base = Gr.y + Gr.h - 30, gh = base - top, X = i => px + i / (n - 1) * pw;
+    panel(ctx, Gr.x, Gr.y, Gr.w, Gr.h); FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('THE STORM, SOL BY SOL', Gr.x + 12, Gr.y + 20);
+    FONT(ctx, 10); ctx.textAlign = 'right'; for (const v of [0, 50, 100]) { const y = base - gh * v / 100; ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText(v + '%', px - 6, y + 3); ctx.fillStyle = 'rgba(219,234,242,.1)'; ctx.fillRect(px, y, pw, 1); }
+    ctx.textAlign = 'center'; for (let i = 0; i < n; i += 2) { ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText('sol ' + (i + 1), X(i), base + 14); }
+    const r = st.res, K = r ? st.k : 0, curve = (vals, close) => { const pts = vals.map((v, i) => [X(i), base - gh * v]); const m = Math.max(1, Math.min(pts.length, Math.floor(K) + 1));
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 0; i < m - 1; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+        const cy = v => clamp(v, top, base);   // keep the smoothing inside the graph (no dips below 0% or above 100%)
+        ctx.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, cy(p1[1] + (p2[1] - p0[1]) / 6), p2[0] - (p3[0] - p1[0]) / 6, cy(p2[1] - (p3[1] - p1[1]) / 6), p2[0], p2[1]); }
+      if (close) { ctx.lineTo(pts[m - 1][0], base); ctx.lineTo(pts[0][0], base); ctx.closePath(); } };
+    if (r) {
+      curve(r.log.map(s => s.solar / 645), true); ctx.fillStyle = 'rgba(255,210,74,.28)'; ctx.fill();
+      curve(r.log.map(s => s.solar / 645)); ctx.strokeStyle = 'rgba(255,210,74,.9)'; ctx.lineWidth = 2; ctx.stroke();
+      curve(r.log.map(s => s.batt / 100)); ctx.strokeStyle = '#5dff9e'; ctx.lineWidth = 3; ctx.stroke();
+      r.log.forEach((s, i) => { if (i <= K && s.temp < -40) { ctx.fillStyle = '#46d9ff'; ctx.beginPath(); ctx.arc(X(i), base - 6, 4, 0, PIE * 2); ctx.fill(); } });
+      const cur = r.log[Math.min(n - 1, Math.floor(K))]; ctx.textAlign = 'left'; FONT(ctx, 12, 600); ctx.fillStyle = '#dbeaf2';
+      ctx.textAlign = 'right'; ctx.fillText('Sol ' + (cur.sol + 1) + ' · tau ' + cur.tau.toFixed(1) + ' · battery ' + Math.round(cur.batt) + '%', Gr.x + Gr.w - 12, Gr.y + 20);
+    } else { ctx.textAlign = 'center'; FONT(ctx, 13); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText('Choose your systems, then press Run the storm', Gr.x + Gr.w / 2, top + gh / 2); }
+    ctx.textAlign = 'left'; FONT(ctx, 12); const legend = [['#ffd24a', 'Solar energy collected each sol (Mars day)'], ['#5dff9e', 'Battery charge'], ['#46d9ff', 'Nights below −40 °C (can damage the battery)']];
+    legend.forEach(([c, t], i) => { ctx.fillStyle = c; ctx.fillRect(Gr.x, Gr.y + Gr.h + 14 + i * 20, 10, 10); ctx.fillStyle = 'rgba(219,234,242,.8)'; ctx.fillText(wrapLines(ctx, t, Gr.w - 20)[0], Gr.x + 16, Gr.y + Gr.h + 23 + i * 20); });
     if (!st.run) drawBtn(ctx, L.run, '▶ Run the storm', { primary: true });
-    else { ctx.textAlign = 'left'; FONT(ctx, 14, 700); ctx.fillStyle = st.over ? (st.fault ? '#ff6b5a' : '#5dff9e') : '#ffb000'; ctx.fillText(st.over ? (st.fault ? 'LOW-POWER FAULT' : 'Survived the peak (in this model)') : 'Sol ' + (st.sol + 1) + ' of ' + n + '… tau ' + (2 + 8.8 * st.sol / (n - 1)).toFixed(1), L.run.x, L.run.y + 30); }
     FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'left'; ctx.fillText('Simplified model with game values. Storm nights are less cold because dust traps heat.', R.x, R.y + R.h + 18); ctx.textAlign = 'center';
   },
   comm(b, st, ctx, now, w, h) {
@@ -1610,7 +1708,7 @@ const STEP_DRAW = {
     ctx.fillText('Radio takes several minutes each way between Earth and Mars (here sped up).', R.x + 20, R.y + 222);
     ctx.fillText('Your commands: ' + st.tries + '   ·   NASA sent more than 1,000 between June 2018 and February 2019.', R.x + 20, R.y + 244);
     drawBtn(ctx, L.tx, 'Transmit wake-up', { primary: true, disabled: !(st.v > .55) || st.phase !== 'idle' }); drawBtn(ctx, L.hypo, 'Hypothetical: wind cleans panels', { disabled: st.tries < 3 || st.phase !== 'idle' });
-    drawBtn(ctx, L.fin, 'Accept the outcome', { disabled: st.tries < 3 || st.phase !== 'idle' });
+    drawBtn(ctx, L.fin, 'Give up', { disabled: st.phase !== 'idle' });
     if (st.phase === 'idle') drawSlider(ctx, L.slider, st.v, 'Months after the storm: drag forward', 'month');
     ctx.textAlign = 'center';
   },
@@ -1645,7 +1743,7 @@ function benchHud(ctx, w, h, now) {
   if (st && STEP_DRAW[st.t]) STEP_DRAW[st.t](B, st, ctx, now, w, h);
   const wide = w >= 900, pw = wide ? 360 : w - 32; FONT(ctx, 12);
   const hist = wide ? wrapLines(ctx, t.when + ': ' + t.history, pw - 24).slice(0, 6) : [], n = B.steps.length;
-  panel(ctx, 16, 16, pw, (wide ? 100 + hist.length * 16 + n * 22 : 62));
+  const ph = wide ? 100 + hist.length * 16 + n * 22 : 62; panel(ctx, 16, 16, pw, ph);
   ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = LABEL[t.label][1]; ctx.fillText(LABEL[t.label][0] + '  ·  ' + rover.C.short.toUpperCase(), 28, 34);
   FONT(ctx, 15, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, 28, 54);
   if (wide) {
@@ -1656,12 +1754,14 @@ function benchHud(ctx, w, h, now) {
   }
   const secs = Math.floor((now - rover.t0) / 1000);
   ctx.textAlign = 'center'; FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText(rover.C.short + '  ·  ' + String(secs / 60 | 0).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0') + '  ·  mistakes ' + G.mistakes, w / 2, 28);
-  if (now - G.toastT < 4500) { FONT(ctx, 14); ctx.fillStyle = '#ffb000'; const lines = wrapLines(ctx, G.toast, Math.min(760, w - 60)); lines.forEach((ln, i) => ctx.fillText(ln, w / 2, 52 + i * 18)); }
+  if (G.toast && now - G.toastT < 4500) {   // messages sit in the left column under the task panel, so they never cover the task's own text
+    FONT(ctx, 14); const lines = wrapLines(ctx, G.toast, pw - 24), ty = 16 + ph + 10; panel(ctx, 16, ty, pw, 16 + lines.length * 19);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#ffb000'; lines.forEach((ln, i) => ctx.fillText(ln, 28, ty + 22 + i * 19)); ctx.textAlign = 'center'; }
   if (st) {
     FONT(ctx, 18, 600); ctx.fillStyle = '#fff'; ctx.fillText(st.text, w / 2, h - 52);
     FONT(ctx, 13); ctx.fillStyle = now - G.hintT < 5000 ? '#ffb000' : 'rgba(219,234,242,.75)'; ctx.fillText(HINTS[st.t] ? HINTS[st.t][G.mouseOnly ? 1 : 0] : '', w / 2, h - 28);
   }
-  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Esc back · F hint · I learn more · S sound', w - 16, h - 8); ctx.textAlign = 'center';
+  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Scroll to zoom · Esc back · F hint · I learn more · S sound', w - 16, h - 8); ctx.textAlign = 'center';
   if (B.done) { const bx = w / 2 - 220, by = h / 2 - 50; panel(ctx, bx, by, 440, 100); FONT(ctx, 22, 600); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓ Task complete', w / 2, by + 42); FONT(ctx, 14); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, w / 2, by + 72); }
 }
 function hud(ctx, w, h, n, now) {
@@ -1695,7 +1795,7 @@ function hud(ctx, w, h, n, now) {
   else guide = 'Point at the glowing part to start the next task. Point at anything else to learn about it';
   F(16, 600); ctx.fillStyle = '#fff'; ctx.fillText(guide, w / 2, h - 40);
   if (now - G.toastT < 4500 && !G.panel) { F(14); ctx.fillStyle = '#ffb000'; wrapLines(ctx, G.toast, Math.min(700, w - 400)).forEach((ln, i) => ctx.fillText(ln, w / 2, 34 + i * 18)); }
-  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('M missions · L lock · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
+  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('Scroll zoom · M missions · L lock · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
 }
 </script>
 </body>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project RECLAIM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Michroma&family=Space+Mono:wght@400;700&display=swap">
+<style>
+  :root { --bg:#03060b; --ink:#dbeaf2; --dim:rgba(219,234,242,.62); --cyan:#46d9ff; --amber:#ffb000; --green:#5dff9e; --orange:#ff9a3c; --panel:rgba(5,10,18,.86); --line:rgba(70,217,255,.35); }
+  * { box-sizing:border-box; }
+  html, body { margin:0; min-height:100%; background:var(--bg); color:var(--ink); font-family:"Chakra Petch", "Segoe UI", system-ui, sans-serif; }
+  body { background:radial-gradient(ellipse at 50% -10%, #12233a 0%, var(--bg) 60%) fixed; }
+  #stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
+  body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:1; background:repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 3px); }
+  main { position:relative; z-index:2; max-width:1080px; margin:0 auto; padding:28px 18px 60px; }
+  .kick { font:700 .72rem "Space Mono", monospace; letter-spacing:.16em; color:var(--cyan); }
+  h1 { font:400 clamp(1.9rem, 6vw, 3.4rem) "Michroma", sans-serif; letter-spacing:.06em; margin:10px 0 6px; text-shadow:0 0 24px rgba(70,217,255,.35); }
+  .sub { font:700 .9rem "Space Mono", monospace; letter-spacing:.12em; color:var(--amber); }
+  .lead { max-width:760px; line-height:1.6; color:var(--ink); opacity:.9; }
+  .tag { display:inline-block; font:700 .66rem "Space Mono", monospace; letter-spacing:.1em; padding:2px 7px; border:1px solid currentColor; border-radius:4px; margin-right:6px; }
+  .fic { color:var(--orange); } .real { color:var(--green); }
+  .progress { display:flex; align-items:center; gap:10px; margin:18px 0 26px; font:700 .82rem "Space Mono", monospace; letter-spacing:.08em; }
+  .dot { width:14px; height:14px; border-radius:50%; border:1px solid var(--line); background:transparent; }
+  .dot.on { background:var(--green); border-color:var(--green); box-shadow:0 0 10px var(--green); }
+  .dests { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; }
+  .dest { display:flex; align-items:center; gap:18px; text-align:left; width:100%; cursor:pointer; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px; font:inherit; transition:border-color .2s, transform .2s; }
+  .dest:hover, .dest.sel { border-color:var(--amber); transform:translateY(-2px); }
+  .dest:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+  .orb { width:86px; height:86px; flex:none; border-radius:50%; box-shadow:inset -14px -10px 28px rgba(0,0,0,.65), 0 0 26px rgba(255,255,255,.08); }
+  .orb.moon { background:radial-gradient(circle at 35% 35%, #d9d9d6, #8e8e8c 55%, #4a4a4a); }
+  .orb.mars { background:radial-gradient(circle at 35% 35%, #f0a070, #b4532a 55%, #5a2410); }
+  .dest h2 { font:400 1.25rem "Michroma", sans-serif; margin:0 0 6px; }
+  .dest p { margin:0; color:var(--dim); line-height:1.45; }
+  #cards { display:none; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; margin-top:24px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; }
+  .card canvas { width:100%; height:190px; display:block; background:radial-gradient(circle at 50% 70%, #1a2738, #060a12 75%); }
+  .card .body { padding:16px 18px 18px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .card h3 { font:400 1.05rem "Michroma", sans-serif; margin:0; }
+  .card .meta { font:700 .72rem "Space Mono", monospace; color:var(--dim); letter-spacing:.06em; }
+  .card .sec { font:700 .7rem "Space Mono", monospace; letter-spacing:.12em; margin-top:6px; }
+  .card p { margin:0; line-height:1.5; }
+  .card .done { color:var(--green); font:700 .8rem "Space Mono", monospace; }
+  .btn { font:600 1rem "Chakra Petch", sans-serif; letter-spacing:.03em; color:var(--ink); background:rgba(255,176,0,.14); border:1px solid var(--amber); border-radius:6px; padding:12px 20px; min-height:48px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+  .btn:hover { background:rgba(255,176,0,.32); }
+  .btn.alt { background:transparent; border-color:rgba(70,217,255,.5); }
+  .btn.alt:hover { background:rgba(70,217,255,.18); }
+  .btn:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+  .card .btn { margin-top:auto; }
+  #finale { display:none; margin-top:24px; padding:20px; border:1px solid var(--green); border-radius:10px; background:rgba(93,255,158,.07); }
+  #finale h2 { font:400 1.2rem "Michroma", sans-serif; margin:0 0 8px; }
+  footer { margin-top:40px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .note { margin-top:18px; color:var(--dim); font-size:.88rem; line-height:1.55; }
+  #toast { position:fixed; z-index:5; left:50%; top:16px; transform:translateX(-50%); background:rgba(93,255,158,.15); border:1px solid var(--green); color:#fff; border-radius:6px; padding:10px 16px; display:none; }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div id="toast" role="status"></div>
+<main>
+  <div class="kick">DEEP SPACE NETWORK ARCHIVE · STORY MODE</div>
+  <h1>PROJECT RECLAIM</h1>
+  <div class="sub">2075 · ABANDONED, NOT FORGOTTEN</div>
+  <p class="lead">The year is 2075. Humanity runs research outposts on the Moon and Mars. Project RECLAIM sends you, an astronaut, to four NASA rovers that were left behind. Fly to each one, find out what really went wrong, use your own hands to repair or investigate it, then take it on one last short drive.</p>
+  <p class="lead"><span class="tag fic">FICTION</span>The 2075 expedition is invented. <span class="tag real">REAL</span>Every rover’s history comes from NASA.</p>
+  <div class="progress" aria-live="polite"><span>ROVERS RECLAIMED</span><span id="dots"></span><span id="count"></span></div>
+
+  <div class="kick" style="margin-bottom:10px">CHOOSE A DESTINATION</div>
+  <div class="dests">
+    <button class="dest" data-body="MOON" type="button"><span class="orb moon"></span><span><h2>The Moon</h2><p>Apollo 15 and Apollo 17 Lunar Roving Vehicles · 1971–1972</p><p class="cnt"></p></span></button>
+    <button class="dest" data-body="MARS" type="button"><span class="orb mars"></span><span><h2>Mars</h2><p>Spirit and Opportunity · 2004–2018</p><p class="cnt"></p></span></button>
+  </div>
+  <div id="cards"></div>
+
+  <div id="finale"><h2>All four rovers reclaimed</h2><p>Your expedition is complete. Fly home to Earth for Mission Control’s final report.</p><p style="margin-top:12px"><a class="btn" href="story.html?ending=1">Return to Earth ▶</a></p></div>
+
+  <p class="note">Repairs use your webcam to track your hands (pinch, point, twist, open palm), or your mouse. The camera needs your permission and a secure page (https:// or localhost). Video is processed only in your browser and is never uploaded. Driving and walking use the keyboard: WASD, Shift and E.</p>
+  <footer>
+    <a class="btn alt" href="https://jovial-donut-bcf3e8.netlify.app/">← The Last Transmission</a>
+    <a class="btn alt" href="repair.html">Free play: all repairs</a>
+    <button class="btn alt" id="reset" type="button">Reset progress</button>
+  </footer>
+  <p class="note">Historical information from NASA (Apollo mission summaries, NASA History SP-4029; NASA Science mission pages). 3D models are simplified illustrations, not to scale.</p>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="shared/models.js"></script>
+<script>
+const $ = s => document.querySelector(s), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+/* background stars */
+(function stars() { const cv = $('#stars'), c = cv.getContext('2d'); const draw = () => { cv.width = innerWidth; cv.height = innerHeight; c.fillStyle = '#fff'; for (let i = 0; i < 260; i++) { c.globalAlpha = Math.random() * .7 + .1; c.fillRect(Math.random() * cv.width, Math.random() * cv.height, Math.random() < .1 ? 2 : 1, 1); } }; draw(); addEventListener('resize', draw); })();
+
+function renderProgress() {
+  const p = getProgress(), n = RECLAIM_ORDER.filter(id => p[id]).length;
+  $('#dots').innerHTML = RECLAIM_ORDER.map(id => '<span class="dot' + (p[id] ? ' on' : '') + '" title="' + esc(MISSIONS.find(m => m.id === id).short) + '"></span>').join(' ');
+  $('#dots').style.display = 'inline-flex'; $('#dots').style.gap = '6px'; $('#count').textContent = n + ' / 4';
+  document.querySelectorAll('.dest').forEach(b => { const ids = RECLAIM_ORDER.filter(id => RECLAIM[id].body === b.dataset.body); b.querySelector('.cnt').textContent = ids.filter(id => p[id]).length + ' of 2 reclaimed'; });
+  $('#finale').style.display = n === 4 ? 'block' : 'none';
+}
+
+/* live 3D previews of the rovers, drawn with one shared renderer */
+const R = new THREE.WebGLRenderer({ antialias: true, alpha: true }); R.setPixelRatio(1); R.setSize(480, 304); R.outputEncoding = THREE.sRGBEncoding;
+const previews = [];
+function previewScene(m) {
+  const sc = new THREE.Scene(), cam = new THREE.PerspectiveCamera(35, 480 / 304, .1, 100); cam.position.set(0, 2.2, 7.4); cam.lookAt(0, .2, 0);
+  sc.add(new THREE.HemisphereLight(0xe8f4ff, 0x302418, 1.1)); const k = new THREE.DirectionalLight(0xffffff, 1.3); k.position.set(3, 5, 4); sc.add(k);
+  const p = makePart(wholeDef(m, ['sand']), 'normal'), piv = new THREE.Group(), box = new THREE.Box3().setFromObject(p.g), s = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  p.g.position.copy(c).multiplyScalar(-1); piv.add(p.g); piv.scale.setScalar(3.6 / Math.max(s.x, s.z)); piv.rotation.x = .25; sc.add(piv);
+  return { sc, cam, piv };
+}
+function showBody(body) {
+  document.querySelectorAll('.dest').forEach(b => b.classList.toggle('sel', b.dataset.body === body));
+  const p = getProgress(), ids = RECLAIM_ORDER.filter(id => RECLAIM[id].body === body);
+  $('#cards').innerHTML = ids.map(id => { const m = MISSIONS.find(x => x.id === id), r = RECLAIM[id];
+    return '<article class="card"><canvas width="480" height="304" data-id="' + id + '" aria-label="3D model of ' + esc(m.short) + '"></canvas><div class="body">' +
+      '<h3>' + esc(m.name) + '</h3><div class="meta">' + esc(m.years) + ' · ' + esc(m.where) + '</div>' + (p[id] ? '<div class="done">✓ RECLAIMED</div>' : '') +
+      '<div class="sec" style="color:var(--green)">REAL HISTORY</div><p>' + esc(m.card) + '</p>' +
+      '<div class="sec" style="color:var(--orange)">YOUR 2075 MISSION</div><p>' + esc(r.task) + '</p>' +
+      '<a class="btn" href="story.html?mission=' + id + '">' + (p[id] ? 'Play again ▶' : 'Start mission ▶') + '</a></div></article>'; }).join('');
+  $('#cards').style.display = 'grid';
+  previews.length = 0; document.querySelectorAll('#cards canvas').forEach(cv => previews.push(Object.assign(previewScene(MISSIONS.find(x => x.id === cv.dataset.id)), { cv, ctx: cv.getContext('2d') })));
+  $('#cards').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+document.querySelectorAll('.dest').forEach(b => b.onclick = () => showBody(b.dataset.body));
+$('#reset').onclick = () => { if (confirm('Reset all Project RECLAIM progress?')) { try { localStorage.removeItem(progressKey); } catch (e) {} renderProgress(); const sel = $('.dest.sel'); if (sel) showBody(sel.dataset.body); } };
+(function tick(t) { requestAnimationFrame(tick); for (const p of previews) { p.piv.rotation.y = t / 2600; R.render(p.sc, p.cam); p.ctx.clearRect(0, 0, 480, 304); p.ctx.drawImage(R.domElement, 0, 0); } })(0);
+
+renderProgress();
+const done = new URLSearchParams(location.search).get('done');
+if (done && RECLAIM[done]) {
+  const m = MISSIONS.find(x => x.id === done); $('#toast').textContent = '✓ ' + m.short + ' reclaimed. Choose your next rover.'; $('#toast').style.display = 'block'; setTimeout(() => $('#toast').style.display = 'none', 4500);
+  showBody(RECLAIM[done].body);
+}
+</script>
+</body>
+</html>

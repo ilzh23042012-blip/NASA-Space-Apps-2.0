@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover Rescue</title>
+<style>
+  :root { --bg:#05070c; --ink:#dbeaf2; --cyan:#46d9ff; --amber:#ffb000; --green:#5dff9e; --orange:#ff9a3c; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden; font-family:"Segoe UI", system-ui, sans-serif; }
+  #video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); z-index:1; filter:brightness(.55) sepia(.5) hue-rotate(-20deg) saturate(1.3); transition:opacity .45s, filter .6s; }
+  #gl { position:fixed; inset:0; z-index:2; pointer-events:none; transition:background .45s; }
+  canvas.p5Canvas { position:fixed; inset:0; z-index:3; }
+  #overlay, #story { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; }
+  #overlay { z-index:9; gap:14px; text-align:center; background:radial-gradient(circle at 50% 35%, #1c2230, var(--bg) 70%); }
+  #overlay h1 { margin:0; font-weight:300; font-size:clamp(1.8rem,5.5vw,3.2rem); letter-spacing:.02em; }
+  #overlay p, #overlay li { max-width:46em; line-height:1.6; }
+  #overlay p { margin:0; opacity:.9; }
+  #overlay ul { margin:0; padding:0; list-style:none; opacity:.75; font-size:.92rem; }
+  #overlay .note { font-size:.85rem; opacity:.65; }
+  #story { z-index:8; display:none; background:rgba(3,5,9,.5); }
+  #story .card { max-width:780px; width:100%; max-height:calc(100vh - 40px); overflow:auto; background:rgba(6,10,18,.95); border:1px solid rgba(70,217,255,.4); border-radius:10px; padding:22px 26px; box-shadow:0 0 40px rgba(0,0,0,.6); line-height:1.55; }
+  #story h2 { margin:.2em 0 .1em; font-weight:500; font-size:1.6rem; }
+  #story h3 { margin:1em 0 .3em; color:var(--cyan); font-size:1rem; letter-spacing:.04em; text-transform:uppercase; }
+  #story p { margin:.4em 0; }
+  #story .meta { opacity:.7; }
+  #story .small { font-size:.85rem; opacity:.7; }
+  #story ul, #story ol { margin:.3em 0; padding-left:1.3em; }
+  #story a { color:var(--cyan); }
+  #story .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
+  #story details { margin:.6em 0; }
+  #story details p { background:rgba(70,217,255,.06); padding:10px 12px; border-left:3px solid var(--cyan); }
+  .badge { display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.06em; padding:3px 8px; border-radius:4px; border:1px solid currentColor; margin:0 6px 4px 0; }
+  .hbtn { font:inherit; padding:12px 22px; min-height:48px; border-radius:6px; cursor:pointer; color:var(--ink); background:rgba(255,176,0,.12); border:1px solid var(--amber); }
+  .hbtn.sec { background:transparent; border-color:rgba(219,234,242,.4); }
+  .hbtn:hover, .hbtn.hhover { background:rgba(255,176,0,.32); }
+  .hbtn:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+  .hbtn:disabled { opacity:.4; cursor:default; }
+  summary.hbtn { display:inline-block; list-style:none; padding:8px 16px; min-height:0; }
+  summary.hbtn::-webkit-details-marker { display:none; }
+  #bar { position:fixed; top:14px; right:14px; z-index:7; display:none; gap:8px; }
+  #bar .hbtn { padding:8px 14px; min-height:44px; background:rgba(5,9,16,.82); border-color:rgba(70,217,255,.5); }
+  #bar .hbtn:hover, #bar .hbtn.hhover { background:rgba(70,217,255,.25); }
+  #msg { min-height:1.4em; color:var(--amber); font-size:.95rem; }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<canvas id="gl"></canvas>
+<div id="overlay">
+  <h1>Abandoned, Not Forgotten: Rover Rescue</h1>
+  <p>Four NASA rovers were left behind on the Moon and Mars. Use your own hands, tracked by your webcam, to inspect each one, act out what really happened to it, and learn why it still matters.</p>
+  <ul>
+    <li><b>Point</b> to scan · <b>Pinch</b> to grab · <b>Open your fingers</b> to drop · <b>Twist</b> to turn screws and knobs · <b>Open palm</b> to wipe</li>
+    <li>Glowing <b>cat's cradle strings</b> stretch between your fingertips: some tasks use them as tape or a tow line.</li>
+    <li>One hand holds and turns the rover, the other scans. Hold still to lock it so both hands are free.</li>
+  </ul>
+  <div class="row" style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+    <button id="start" class="hbtn">Start camera</button>
+    <button id="mouse" class="hbtn sec">Play with mouse</button>
+  </div>
+  <p class="note">The camera needs your permission and a secure page (https:// or localhost). Video is processed only in your browser and is never uploaded.</p>
+  <div id="msg" role="status"></div>
+</div>
+<div id="story" role="dialog" aria-modal="true"></div>
+<div id="bar"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script src="shared/models.js"></script>
+<script>
+
+/* ================= repair-bay recipes ================= */
+const SAND = 0xc79a63;
+const RECIPES = {
+  a15_steer: { unitDef: C => wholeDef(C), scale: 1.1, rot: [1.05, 0, 0], pos: [-.5, -.25], noPulse: true,
+    extra(b) { b.wp = {}; for (const id of ['wFL', 'wFR', 'wRL', 'wRR']) { const d = b.C.parts.find(x => x.id === id); b.wp[id] = pivotOf(b, m => m.userData.pid === id, d.home); }
+      b.hcp = pivotOf(b, m => m.userData.pid === 'hc', V(.22, .15, 0)); },
+    steps: [
+      { t: 'handle', front: false, need: 2, short: 'First drive: test the steering', text: 'Tilt the T-handle left and right and watch which wheels turn' },
+      { t: 'switches', mode: 'cycle', cx: .78, short: 'Troubleshoot the switches', text: 'Switch the forward-steering circuit off, then back on', title: 'CONTROL CONSOLE · STEERING AND POWER',
+        list: [['Forward steering', 0, null, true], ['Rear steering', 0, 'Rear steering is the one that works. Leave it on'], ['Drive power (wheel motors)', 0, 'The wheels need it to move'], ['Navigation system', 0, 'It tracks the way back to the Lunar Module']] },
+      { t: 'handle', front: false, need: 2, short: 'Test after troubleshooting', text: 'Test again: did cycling the switch bring the front wheels back?',
+        msg: 'Still no response. In 1971 Scott drove the whole first traverse steering with the rear wheels only' },
+      { t: 'handle', front: true, need: 2, short: 'Next day: test again', text: 'Second moonwalk, next morning: power up and test the steering again',
+        msg: 'The front wheels steer again. Nobody ever found out exactly why' }] },
+  a15_route: { unitDef: () => EMPTY, scale: 1, rot: [0, 0, 0], pos: [0, 0], noPulse: true,
+    steps: [{ t: 'route', short: 'Plan the drive', text: 'Pick stops on the map, then press Drive' }, { t: 'samples', short: 'Classify the samples', text: 'Sort each rock into the right type' }] },
+  a17_dust: { unitDef: () => lrvCorner, scale: 2.2, rot: [.22, .55, 0], pos: [.6, -.6], noPulse: true,
+    extra(b) { b.spinPiv = pivotOf(b, m => m.userData.spin, V(0, 0, 0)); },
+    steps: [{ t: 'dusttest', when: 'before', short: 'Drive and watch the dust', text: 'Turn the wheel and watch where the dust goes', need: 12 }] },
+  a17_fender: { unitDef: () => lrvCorner, scale: 2.2, rot: [.22, .55, 0], pos: [1.4, -.6], noPulse: true, boltStyle: 'clamp', boltR: .03,
+    extra(b) { b.spinPiv = pivotOf(b, m => m.userData.spin, V(0, 0, 0)); },
+    bolts: [V(-.2, .46, .05), V(-.47, .2, .05)].map(p => ({ p, a: V(0, 0, 1) })),
+    steps: [
+      { t: 'tape', fail: true, short: 'First try: tape it', text: 'Do what the crew did first: tape across the broken edge of the fender' },
+      { t: 'assemble', set: 'maps', short: 'Lay out four maps', text: 'Pinch each map and place it on the outline to make one stiff sheet' },
+      { t: 'tape', short: 'Tape the seams', text: 'Stretch tape between your hands and lay it along each glowing seam' },
+      { t: 'assemble', set: 'fender', short: 'Fit the new fender', text: 'Carry the taped sheet to where the extension broke off' },
+      { t: 'bolt', short: 'Tighten the clamps', text: 'Tighten both clamps to hold the sheet on the fender' },
+      { t: 'dusttest', when: 'after', short: 'Test drive', text: 'Turn the wheel again and compare the dust', need: 12 }] },
+  spirit_wheel: { unitDef: () => merWheelUnit, scale: 2.4, rot: [.6, .45, 0], pos: [1.0, .7], noPulse: true,
+    mount(add, M) { add(new BoxG(2.8, .12, 1.2), M(0x8a5e3c, 0, 1), -.5, -.4, 0); add(new THREE.PlaneGeometry(1.2, .5), M(0xf2f0e6, 0, .8, 0x333330), -.8, -.333, 0, -PIE / 2, 0, 0); },
+    extra(b) { b.spinPiv = pivotOf(b, m => m.userData.spin, V(0, 0, 0)); },
+    dust: [{ at: [-.8, -.326, 0], size: [1.2, .5], rot: [-PIE / 2, 0, 0], sand: true }],
+    steps: [
+      { t: 'motortest', short: 'Command the motor', text: 'Twist or circle the wheel to command its motor. Does it turn?' },
+      { t: 'wipe', short: 'Drag the wheel', text: 'Drive backwards: drag the dead wheel through the soil to dig a trench', goal: .8, gauge: p => 'Bright soil exposed ' + Math.round(100 * p) + '%', done: 'Bright white soil: almost pure silica!' }] },
+  mer_wheel: { unitDef: () => merWheelUnit, scale: 3.5, rot: [-.18, .5, 0], pos: [-.5, 0],
+    mount(add, M) {
+      add(new CylG(.2, .2, .04, 24), M(0x9aa4ad, .85, .3), 0, 0, 0, PIE / 2, 0, 0);
+      for (const [x, y] of [[.13, 0], [0, .13], [-.13, 0], [0, -.13]]) add(new CylG(.02, .02, .05, 8), M(0x15171a, .5, .6), x, y, .01, PIE / 2, 0, 0);
+      add(new CylG(.07, .07, .5, 12), M(0x777d84, .8, .4), 0, 0, -.3, PIE / 2, 0, 0); add(new BoxG(.1, .8, .1), M(STEEL, .8, .4), 0, .38, -.55); add(new BoxG(.9, .1, .1), M(STEEL, .8, .4), .3, .78, -.55); },
+    bolts: [[.13, 0], [0, .13], [-.13, 0], [0, -.13]].map(([x, y]) => ({ p: V(x, y, .15), a: V(0, 0, 1) })),
+    steps: [
+      { t: 'unbolt', text: 'Undo the 4 hub bolts holding the dead wheel' },
+      { t: 'remove', text: 'Pull the dead wheel off and drop it in the scrap bin' },
+      { t: 'fit', text: 'Take a new wheel from the spares rack and fit it onto the hub' },
+      { t: 'bolt', text: 'Screw the 4 hub bolts back in' }] },
+  spirit_escape: { unitDef: C => wholeDef(C, ['sand']), scale: 1.0, rot: [.22, -.55, 0], pos: [0, .55], noPulse: true,
+    mount(add, M) { add(new SphG(1.6, 30, 10, 0, PIE * 2, 0, PIE / 2).scale(1.1, .26, .85), M(SAND, 0, 1), 0, -.72, .1); },
+    extra(b) { b.unit.g.position.y = -.16; },
+    steps: [{ t: 'traction', short: 'Try escape moves', text: 'Choose a direction and wheel speed, then try a drive' }] },
+  mer_tow: { unitDef: C => wholeDef(C, ['sand']), scale: 1.0, rot: [.22, -.55, 0], pos: [0, -.1], noPulse: true,
+    mount(add, M) { add(new SphG(1.6, 30, 10, 0, PIE * 2, 0, PIE / 2).scale(1.1, .26, .85), M(SAND, 0, 1), 0, -.72, .1); },
+    extra(b) { b.unit.g.position.y = -.16; },
+    steps: [{ t: 'tension', short: 'Tow experiment', text: 'Hook the string on the tow point and pull it taut', at: V(1.0, -.15, 0), need: 3, label: 'TOW POINT', tow: true }] },
+  spirit_winter: { unitDef: C => wholeDef(C, ['sand']), scale: .95, rot: [.15, -.2, 0], pos: [-.6, -.9], noPulse: true,
+    extra(b) { tuneSetup(b, { pc: V(0, -.75, 0), dc: V(0, .3, 0), n0: V(0, 1, 0), base: -.5, dist: 1.6, min: .5, max: .62, limit: .3, label: 'SUN', meter: 'Sunlight', color: 0xffd24a, emissive: 0x8a6a00, ground: -.82,
+      done: 'That is as far as Spirit could tilt: its panels still miss the Sun' }); },
+    steps: [
+      { t: 'tune', short: 'Tilt toward the Sun', text: 'Turn the knob to tilt Spirit toward the low winter Sun' },
+      { t: 'switches', mode: 'shed', short: 'Cut the winter load', text: 'Switch off everything Spirit does not need to survive the winter', supply: 160, title: 'WINTER ENERGY BUDGET (simplified values)',
+        list: [['Mission clock and wake-up timer', 10, 'It wakes Spirit to check whether its batteries have recovered'], ['Battery and electronics heaters', 70, 'Without heat the batteries could be damaged by the cold'],
+          ['Science instruments', 60], ['Daily radio contact', 80], ['Robotic arm and cameras', 40]] }] },
+  opp_storm: { unitDef: C => wholeDef(C), scale: 1.1, rot: [.3, -.5, 0], pos: [-1.6, -.4], noPulse: true,
+    steps: [{ t: 'storm', short: 'Track the storm', text: 'Drag through the days of the storm and photograph the Sun to measure the sky' }] },
+  opp_energy: { unitDef: C => wholeDef(C), scale: .7, rot: [.35, -.5, 0], pos: [-3.1, -1.3], noPulse: true,
+    steps: [{ t: 'energy', short: 'Manage the energy', text: 'Choose what stays on, then run the storm' }] },
+  opp_comm: { unitDef: C => wholeDef(C), scale: .7, rot: [.3, -.5, 0], pos: [-3.1, -1.3], noPulse: true,
+    steps: [{ t: 'comm', short: 'Try to make contact', text: 'Wait for the sky to clear, then send wake-up commands' }] },
+};
+const HINTS = {
+  unbolt: ['Pinch a bolt and twist your hand anticlockwise ↺ (let go and re-grip like a wrench), or circle the bolt with a fingertip', 'Circle each bolt anticlockwise ↺ with the mouse pointer'],
+  bolt: ['Pinch a screw and twist clockwise ↻, or circle it clockwise with a fingertip', 'Circle each screw clockwise ↻ with the mouse pointer'],
+  remove: ['Pinch the part, pull it away and drop it in the scrap bin', 'Drag the part into the scrap bin'],
+  fit: ['Pinch the matching spare and bring it onto the green outline', 'Drag the matching spare onto the green outline'],
+  wipe: ['Open your hand and rub back and forth over it', 'Hold the mouse button and scrub back and forth'],
+  tune: ['Pinch the knob and twist, or circle it with a fingertip', 'Circle the knob with the mouse pointer'],
+  tension: ['Raise both hands: strings stretch between your fingertips. Lay the index-finger string across the hook, pull your hands apart and hold it taut', 'Press on the hook, drag far away to pull the line taut, and hold'],
+  switches: ['Pinch a switch, or point at it and hold, to flip it', 'Click a switch to flip it'],
+  handle: ['Pinch the T-handle and move your hand left and right', 'Drag the T-handle left and right'],
+  route: ['Point at a stop and hold, or pinch it, to add it to the route. Do it again to remove it', 'Click stops to add or remove them, then click Drive'],
+  samples: ['Point at a rock to read its description, then pinch it and drop it in a bin', 'Hover a rock to read about it, then drag it to a bin'],
+  dusttest: ['Pinch the wheel and twist, or circle it with your fingertip, to drive', 'Circle the wheel with the mouse pointer to drive'],
+  assemble: ['Pinch a piece, carry it and open your fingers on the right spot', 'Drag each piece to the right spot'],
+  tape: ['With both hands up, the string between your index fingers is the tape. Stretch it over a seam, line it up and hold still', 'Press on one end of a glowing seam and drag to the other end'],
+  motortest: ['Pinch the wheel and twist, or circle it with a fingertip', 'Circle the wheel with the mouse pointer'],
+  traction: ['Point and hold (or pinch) a direction, pinch-drag the speed slider, then press Try drive', 'Click a direction, drag the speed slider, then click Try drive'],
+  storm: ['Pinch the timeline slider and move it right. Pinch the camera button to photograph the Sun', 'Drag the timeline slider and click the camera button'],
+  energy: ['Flip systems on or off at any time, and press Run storm', 'Click systems on or off, and click Run storm'],
+  comm: ['Drag the timeline until the sky clears, then press Transmit', 'Drag the timeline until the sky clears, then click Transmit'],
+};
+
+/* ================= state ================= */
+let renderer, scene, cam, keyLight, dust, rover = null, bscene, bcam, sscene, previews = [], B = null, glEl;
+const HOME = V(0, 0, 6);
+const G = { mode: 'intro', mission: 0, panel: false, locked: false, auto: true, still: 0, travel: 0, armed: false, sig: null, tg: null, env: 'MARS', thermal: false, quality: 1, muted: false, swap: false, lock: false,
+  toast: '', toastT: 0, fx: [], mistakes: 0, hints: 0, hintT: -9999, black: 0, mouseOnly: false, mpitch: .35, storm: 0, selT: [0, 0], selI: [-1, -1] };
+const Z = { ph: null, t0: 0, p: null, task: null, wp: null, tgt: null, done: false };
+const mkTS = () => ({ pinch: false, pc: 0, riseT: -1e9, g: null, t: 0, fired: false, hover: null, hoverT: 0, hoverQ: null, lastKey: null,
+  tk: null, tm: null, ta: 0, drag: null, dz: 0, doff: null, wl: [], lostT: 0, lostFired: false, lx: 0, ly: 0, swKey: null, swT: 0, domEl: null, domT: 0 });
+const TS = [mkTS(), mkTS(), mkTS()];   // two hands + mouse
+const MS = { x: -1, y: -1, down: false, t: -1e9, rot: false };
+const isHover = p => TS.some(s => s.hover === p);
+const videoEl = document.getElementById('video'), msgEl = document.getElementById('msg'), storyEl = document.getElementById('story'), barEl = document.getElementById('bar');
+const ray = new THREE.Raycaster(), tmpV = new THREE.Vector3(), tmpC = new THREE.Vector3(), ndc = new THREE.Vector2();
+let started = false, latest = null, hands = null, fps = 0, lastT = 0, ac = null, twId = 0;
+const H = [null, null];
+let best = {}; try { best = JSON.parse(localStorage.getItem('roverRescue8') || '{}'); } catch (e) {}
+const shuf = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+/* ================= audio ================= */
+function beep(f, dur = .09, type = 'sine', vol = .07, delay = 0) {
+  if (!ac || G.muted) return;
+  const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + delay;
+  o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur);
+}
+const arp = (notes, type = 'triangle') => notes.forEach((f, i) => beep(f, .14, type, .08, i * .09));
+const err = msg => { G.mistakes++; toast(msg); beep(150, .15, 'square'); };
+const toast = t => { G.toast = t; G.toastT = performance.now(); };
+
+/* ================= scenes ================= */
+const addLights = (s, k = 1) => { s.add(new THREE.HemisphereLight(0xe8f4ff, 0x302418, 1.0 * k)); const a = new THREE.DirectionalLight(0xffffff, 1.2); a.position.set(2, 3, 5); s.add(a);
+  const r = new THREE.DirectionalLight(0x46d9ff, .5); r.position.set(-4, 1, -2); s.add(r); };
+function initGL() {
+  glEl = document.getElementById('gl');
+  renderer = new THREE.WebGLRenderer({ canvas: glEl, alpha: true, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); renderer.setSize(innerWidth, innerHeight);
+  scene = new THREE.Scene(); cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 50); cam.position.copy(HOME);
+  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x3a2418, .95));
+  keyLight = new THREE.DirectionalLight(0xffd8b0, 1.4); keyLight.position.set(3, 4, 5); scene.add(keyLight);
+  const rim = new THREE.DirectionalLight(0x46d9ff, .6); rim.position.set(-4, 1, -3); scene.add(rim);
+  const pos = new Float32Array(150 * 3); for (let i = 0; i < 450; i++) pos[i] = (Math.random() - .5) * (i % 3 === 0 ? 10 : i % 3 === 1 ? 6 : 4);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  dust = new THREE.Points(geo, new THREE.PointsMaterial({ size: .035, color: 0xe0a67a, transparent: true, opacity: .55, depthWrite: false })); scene.add(dust);
+  bscene = new THREE.Scene(); bcam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 50); bcam.position.copy(HOME); bcam.updateMatrixWorld(); addLights(bscene);
+  sscene = new THREE.Scene(); addLights(sscene, 1.1);
+  previews = MISSIONS.map(C => { const p = makePart(wholeDef(C), 'normal'), box = new THREE.Box3().setFromObject(p.g), s = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    const piv = new THREE.Group(); p.g.position.copy(c).multiplyScalar(-1); piv.add(p.g); piv.userData.size = Math.max(s.x, s.y, s.z); piv.rotation.x = .35; sscene.add(piv); return piv; });
+}
+function setEnv(e) {
+  G.env = e; const moon = e === 'MOON', st = G.storm;
+  videoEl.style.filter = moon ? 'grayscale(1) brightness(.42) contrast(1.15)' : 'brightness(' + (.55 - .35 * st).toFixed(2) + ') sepia(' + (.5 + .3 * st).toFixed(2) + ') hue-rotate(-20deg) saturate(1.3)';
+  keyLight.color.setHex(moon ? 0xffffff : 0xffd8b0); keyLight.intensity = moon ? 1.6 : 1.4 - .7 * st;
+  dust.material.color.setHex(moon ? 0x9a9a9a : 0xe0a67a); dust.material.opacity = moon ? .3 : .55 + .3 * st; dust.material.size = moon ? .02 : .035;
+}
+function bayBackground() {
+  if (G.env === 'MOON') return 'radial-gradient(circle at 50% 45%, rgba(42,44,48,.9), rgba(3,4,6,.98) 72%)';
+  const s = G.storm, a = (58 - 34 * s) | 0, b2 = (36 - 22 * s) | 0, c = (26 - 16 * s) | 0;
+  return 'radial-gradient(circle at 50% 45%, rgba(' + a + ',' + b2 + ',' + c + ',.92), rgba(6,4,3,.98) 72%)';
+}
+function buildRover() {
+  const C = MISSIONS[G.mission];
+  if (B) { bscene.remove(B.root); B = null; }
+  G.mode = 'main'; G.storm = 0; Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0); videoEl.style.opacity = ''; glEl.style.background = '';
+  if (rover) scene.remove(rover.g);
+  TS.forEach(t => Object.assign(t, mkTS())); G.locked = false; G.armed = false; G.travel = 0; G.still = 0; G.tg = null; G.sig = null; G.mistakes = 0; G.hints = 0;
+  const g = new THREE.Group(); g.rotation.order = 'ZXY'; scene.add(g);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.45, 1.52, 64), new THREE.MeshBasicMaterial({ color: 0x46d9ff, transparent: true, opacity: .45, side: THREE.DoubleSide }));
+  const ring2 = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.13, 6), ring.material);
+  for (const r of [ring, ring2]) { r.rotation.x = -PIE / 2; r.position.y = C.env === 'MOON' ? -.7 : -.85; r.scale.setScalar(C.env === 'MOON' ? 1.6 : 1); g.add(r); }
+  const parts = C.parts.map(def => { const p = makePart(def, 'normal'); g.add(p.g); return p; });
+  const keep = STORY && RECLAIM[C.id] ? RECLAIM[C.id].repairs : null;   // story mode runs only this mission's chosen repairs
+  const tasks = C.tasks.filter(t => !keep || keep.includes(t.recipe)).map((t, i) => Object.assign({}, t, { idx: i, p: parts.find(q => q.def.id === t.part), done: false, bench: null }));
+  rover = { g, rings: [ring, ring2], parts, tasks, ex: 0, s: 1, yaw: 0, roll: 0, pitch: .35, t0: performance.now(), end: 0, testT: 0, C, dust: {} };
+  setEnv(C.env); setBar();
+}
+const socketLocal = p => p.def.home.clone().addScaledVector(p.def.dir, rover.ex * 1.5);
+/* Project RECLAIM story mode: repair.html?story=1&mission=a15 opens one mission and returns to story.html when done */
+const QS = new URLSearchParams(location.search), STORY = QS.get('story') === '1', STORY_ID = QS.get('mission'), STORY_I = MISSIONS.findIndex(m => m.id === STORY_ID);
+const toStory = phase => { location.href = 'story.html?mission=' + encodeURIComponent(STORY_ID) + '&phase=' + phase; };
+function afterStart() { if (STORY && STORY_I >= 0) chooseMission(STORY_I); else G.mode = 'select'; }
+/* task gating: required tasks go in order; optional ones open once their prerequisite is done */
+const unlocked = t => t.optional ? rover.tasks[t.after].done : rover.tasks.filter(u => !u.optional && u.idx < t.idx).every(u => u.done);
+const currentTask = () => rover.tasks.find(t => !t.optional && !t.done);
+const availableTask = p => rover.tasks.find(t => t.p === p && !t.done && unlocked(t));
+const pendingTask = p => rover.tasks.find(t => t.p === p && !t.done);
+
+/* ================= MediaPipe / start ================= */
+function initHands() {
+  hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: .55, minTrackingConfidence: .6 });
+  hands.onResults(r => { latest = r.multiHandLandmarks || []; });
+}
+async function start() {
+  document.getElementById('start').disabled = true;
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msgEl.textContent = 'The camera only works on a secure page (https:// or localhost). Open the game from a web server, or play with the mouse.'; document.getElementById('start').disabled = false; return;
+  }
+  msgEl.textContent = 'Requesting camera access…';
+  try {
+    videoEl.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, frameRate: { ideal: 30 }, facingMode: 'user' }, audio: false });
+    await videoEl.play(); initHands(); msgEl.textContent = 'Loading hand model…';
+    ac = new (window.AudioContext || window.webkitAudioContext)(); let busy = false;
+    const pump = async () => {
+      if (videoEl.readyState >= 2 && !busy) { busy = true; try { await hands.send({ image: videoEl }); } catch (e) { console.error(e); } busy = false; }
+      if (videoEl.requestVideoFrameCallback) videoEl.requestVideoFrameCallback(pump); else requestAnimationFrame(pump);
+    };
+    pump(); G.mouseOnly = false; started = true; document.getElementById('overlay').style.display = 'none';
+    try { localStorage.setItem('reclaimInput', 'camera'); } catch (e) {} afterStart();
+  } catch (e) {
+    console.error(e);
+    msgEl.textContent = e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow it in the address bar, or play with the mouse.' : 'Could not start the camera or load the hand model. Check the connection and camera, or play with the mouse.';
+    document.getElementById('start').disabled = false;
+  }
+}
+function startMouse() {
+  try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  G.mouseOnly = true; started = true; setEnv('MOON'); document.getElementById('overlay').style.display = 'none';
+  try { localStorage.setItem('reclaimInput', 'mouse'); } catch (e) {} afterStart();
+}
+document.getElementById('start').addEventListener('click', start);
+document.getElementById('mouse').addEventListener('click', startMouse);
+addEventListener('pointerdown', () => { if (ac && ac.state === 'suspended') ac.resume(); });
+// story mode: reuse the input the player chose last time (camera permission is remembered by the browser on https)
+if (STORY) addEventListener('load', () => setTimeout(() => {
+  document.querySelector('#overlay h1').textContent = 'Project RECLAIM · Repair bay';
+  let pref = null; try { pref = localStorage.getItem('reclaimInput'); } catch (e) {}
+  if (pref === 'mouse') startMouse(); else if (pref === 'camera') start();
+}, 60));
+
+/* ================= story panels (DOM, usable by hand or mouse) ================= */
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const badge = k => '<span class="badge" style="color:' + LABEL[k][1] + '">' + LABEL[k][0] + '</span>';
+function showPanel(html) { storyEl.innerHTML = '<div class="card">' + html + '</div>'; storyEl.style.display = 'flex'; G.panel = true; const p = storyEl.querySelector('.primary'); if (p) p.focus({ preventScroll: true }); }
+function hidePanel() { storyEl.style.display = 'none'; storyEl.innerHTML = ''; G.panel = false; }
+function showIntro() {
+  const C = rover.C;
+  showPanel('<span class="badge" style="color:' + C.accent + '">' + (STORY ? 'PROJECT RECLAIM · REPAIR BAY' : 'MISSION ' + (G.mission + 1) + ' · ' + C.env) + '</span>' +
+    '<h2>' + esc(C.name) + '</h2><p class="meta">' + esc(C.years) + ' · ' + esc(C.where) + '</p>' +
+    '<h3>Before the incident</h3><p>' + esc(C.before) + '</p><p><b>The people:</b> ' + esc(C.people) + '</p>' +
+    '<h3>Your mission</h3><p>' + esc(STORY && RECLAIM[C.id] ? RECLAIM[C.id].task : C.objective) + '</p><ol>' + rover.tasks.map(t => '<li>' + badge(t.label) + esc(t.title) + (t.optional ? ' <i>(optional)</i>' : '') + '</li>').join('') + '</ol>' +
+    '<p class="small">' + badge('H') + 'what really happened. ' + badge('R') + 'you act out a real event in simplified form. ' + badge('X') + 'a "what if" that did not happen.</p>' +
+    '<div class="row"><button class="hbtn primary" data-act="begin">Begin inspection</button>' + (STORY ? '<button class="hbtn sec" data-act="leave">Back to the astronaut</button>' : '<button class="hbtn sec" data-act="select">Choose another rover</button>') + '</div>');
+}
+function showCard(t) {
+  const all = rover.tasks.filter(u => !u.optional).every(u => u.done), nextOpt = rover.tasks.find(u => u.optional && !u.done && unlocked(u));
+  showPanel(badge(t.label) + '<p class="meta">' + esc(t.when) + '</p><h2>' + esc(t.explain.title) + '</h2><p>' + esc(t.explain.text) + '</p>' +
+    '<h3>What happened</h3><p>' + esc(t.history) + '</p>' +
+    '<details><summary class="hbtn sec">Learn more</summary><p>' + esc(t.learn) + '</p></details>' +
+    (nextOpt && !all ? '<p class="small">Optional ' + badge(nextOpt.label) + 'unlocked: ' + esc(nextOpt.title) + '. Scan the ' + esc(lname(nextOpt.p.def).toLowerCase()) + ' to try it.</p>' : '') +
+    '<div class="row"><button class="hbtn primary" data-act="' + (all ? (STORY ? 'storyDone' : 'finale') : 'cont') + '">' + (all ? (STORY ? 'Return to the astronaut and drive' : 'Finish the mission') : 'Continue') + '</button></div>');
+}
+function showConclusion() {
+  const C = rover.C, secs = Math.round((rover.end - rover.t0) / 1000), prev = best[C.id];
+  if (!prev || secs < prev.secs) { best[C.id] = { secs, errors: G.mistakes }; try { localStorage.setItem('roverRescue8', JSON.stringify(best)); } catch (e) {} }
+  const done = rover.tasks.filter(t => t.done), hyp = done.some(t => t.label === 'X');
+  showPanel('<span class="badge" style="color:' + C.accent + '">MISSION COMPLETE</span><h2>' + esc(C.name) + '</h2>' +
+    '<h3>After the incident</h3><p>' + esc(C.after) + '</p>' +
+    '<h3>Remember</h3><ul>' + C.facts.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul>' +
+    '<h3>What you did</h3><ul>' + done.map(t => '<li>' + badge(t.label) + esc(t.title) + '</li>').join('') + '</ul>' +
+    (hyp ? '<p class="small">Tasks marked ' + badge('X') + 'were simulations of things that never happened.</p>' : '') +
+    '<p class="meta">Time ' + Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s · mistakes ' + G.mistakes + ' · hints ' + G.hints + '</p>' +
+    '<h3>Sources and credits</h3><ul>' + C.sources.map(([t, u]) => '<li><a href="' + u + '" target="_blank" rel="noopener">' + esc(t) + '</a></li>').join('') + '</ul>' +
+    '<p class="small">Historical information from NASA. 3D models are simplified illustrations, not to scale. Real NASA photographs are linked above rather than embedded.</p>' +
+    '<div class="row"><button class="hbtn primary" data-act="select">Choose another rover</button><button class="hbtn sec" data-act="replay">Replay this mission</button></div>');
+}
+function learnMoreBay() {
+  const t = B.task; showPanel(badge(t.label) + '<h2>' + esc(t.title) + '</h2><p class="meta">' + esc(t.when) + '</p><p>' + esc(t.history) + '</p><p>' + esc(t.learn) + '</p>' +
+    '<div class="row"><button class="hbtn primary" data-act="close">Back to the task</button></div>');
+}
+const ACT = {
+  begin() { hidePanel(); toast('Scan the glowing part to start: ' + currentTask().title); },
+  cont() { hidePanel(); const t = currentTask(); if (t) toast('Next: scan the ' + lname(t.p.def).toLowerCase()); },
+  finale() { hidePanel(); rover.testT = performance.now(); toast(rover.C.env === 'MOON' ? 'Test drive' : 'Mission timeline complete'); },
+  select() { hidePanel(); toSelect(); },
+  replay() { hidePanel(); chooseMission(G.mission); },
+  close() { hidePanel(); },
+  back() { exitBench(false); },
+  hint() { hint(); },
+  learn() { if (B) learnMoreBay(); },
+  lock() { setLock(!G.locked); },
+  storyDone() { hidePanel(); setProgress(STORY_ID + '_repair'); G.black = 1; toStory('drive'); },
+  leave() { hidePanel(); toStory('rover'); },
+};
+document.addEventListener('click', e => { const el = e.target.closest('[data-act]'); if (el && !el.disabled && ACT[el.dataset.act]) { if (!ac) try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (er) {} ACT[el.dataset.act](el); } });
+function setBar() {
+  const btn = (act, label) => '<button class="hbtn" data-act="' + act + '">' + label + '</button>';
+  if (G.mode === 'bench') barEl.innerHTML = btn('back', '← Back') + btn('hint', 'Hint') + btn('learn', 'Learn more');
+  else if (G.mode === 'main') barEl.innerHTML = (STORY ? btn('leave', '← Astronaut') : btn('select', 'Missions')) + btn('lock', G.locked ? '🔒 Locked' : '🔓 Free') + btn('hint', 'Hint');
+  else barEl.innerHTML = '';
+  barEl.style.display = barEl.innerHTML ? 'flex' : 'none';
+}
+function chooseMission(i) { G.mission = i; buildRover(); arp([392, 523, 659]); showIntro(); }
+function toSelect() { if (B) { bscene.remove(B.root); B = null; } Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0); videoEl.style.opacity = ''; glEl.style.background = ''; G.mode = 'select'; G.selT = [0, 0]; hidePanel(); setBar(); }
+function hint() {
+  G.hintT = performance.now(); G.hints++;
+  if (G.mode === 'bench' && B && !B.done) { const st = B.steps[B.si]; toast('Hint: ' + (HINTS[st.t] ? HINTS[st.t][G.mouseOnly ? 1 : 0] : st.text)); }
+  else if (rover) { const t = currentTask(); toast(t ? 'Hint: the glowing part is next: ' + lname(t.p.def) : 'All tasks done'); }
+}
+addEventListener('keydown', e => {
+  if (!started) return; const k = e.key.toLowerCase();
+  if (G.panel) { if (k === 'escape') { const c = storyEl.querySelector('[data-act="close"]'); if (c) c.click(); } return; }   // buttons in panels take Enter / Space natively
+  if (G.mode === 'select') { const i = '1234'.indexOf(k); if (i >= 0) chooseMission(i); return; }
+  if (k === 's') { G.muted = !G.muted; toast('Sound ' + (G.muted ? 'off' : 'on')); return; }
+  if (k === 'f') { hint(); return; }
+  if (G.mode === 'bench') { if (k === 'escape' || k === 'b') exitBench(false); else if (k === 'i') learnMoreBay(); return; }
+  if (Z.ph) return;
+  if (k === 'r' && !STORY) chooseMission(G.mission);
+  else if (k === 'm' || k === 'escape') { if (STORY) ACT.leave(); else toSelect(); }
+  else if (k === 't') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); }
+  else if (k === 'e') { G.lock = !G.lock; toast('Exploded view ' + (G.lock ? 'locked open' : 'follows your hand')); }
+  else if (k === 'h') { G.swap = !G.swap; toast(G.swap ? 'Holding with right-on-screen hand' : 'Holding with left-on-screen hand'); }
+  else if (k === 'l') setLock(!G.locked); else if (k === 'a') { G.auto = !G.auto; toast('Auto-lock ' + (G.auto ? 'on' : 'off')); }
+  else if (k === 'q' && hands) { G.quality = 1 - G.quality; hands.setOptions({ modelComplexity: G.quality }); toast(G.quality ? 'Tracking: accurate (slower)' : 'Tracking: fast'); }
+});
+/* mouse: a fallback pointer, and the whole input when there is no camera */
+addEventListener('pointermove', e => {
+  if (!started) return; const dx = e.clientX - MS.x, dy = e.clientY - MS.y; MS.x = e.clientX; MS.y = e.clientY; MS.t = performance.now();
+  if (MS.down && MS.rot && G.mode === 'main' && !Z.ph && rover && !G.locked) { rover.yaw += dx * .01; G.mpitch = clamp(G.mpitch + dy * .006, -.9, 1.1); }
+});
+addEventListener('pointerdown', e => {
+  if (!started || e.button !== 0 || (e.target && e.target.closest && e.target.closest('#story, #bar, #overlay'))) return; const now = performance.now();
+  MS.x = e.clientX; MS.y = e.clientY; MS.down = true; MS.t = now; MS.rot = false; TS[2].riseT = now;
+  if (G.panel) return;
+  if (G.mode === 'select') { const c = selectLayout(innerWidth, innerHeight).find(c => inRect(MS.x, MS.y, c)); if (c) chooseMission(c.i); return; }
+  if (!rover || G.mode !== 'main' || Z.ph) return;
+  const m = pickMesh(MS.x, MS.y, innerWidth, innerHeight, liveParts(), 6);
+  if (m && !rover.testT) { const p = m.userData.part; scanPart(p); const t = availableTask(p); if (t) enterBench(p, t); } else MS.rot = true;
+});
+addEventListener('pointerup', () => { MS.down = false; MS.rot = false; });
+const mouseLive = now => G.mouseOnly || now - MS.t < 4000 || MS.down;
+/* hands press DOM buttons: point and hold, or pinch */
+function domHands(ctx, hv, now, dt, allow) {
+  const hov = new Set();
+  for (let s = 0; s < 2; s++) {
+    const S = TS[s], T = hv[s];
+    if (!T || !allow[s]) { S.domEl = null; S.domT = 0; continue; }
+    const P = H[s], x = S.pinch ? T.pp.x : P[8].x, y = S.pinch ? T.pp.y : P[8].y, el = document.elementFromPoint(x, y), btn = el && el.closest ? el.closest('.hbtn') : null;
+    if (btn && btn.disabled) { S.domEl = null; continue; }
+    if (btn === S.domEl && btn) S.domT += dt; else { S.domEl = btn; S.domT = 0; }
+    if (!btn) continue;
+    hov.add(btn);
+    const pinchNow = S.pinch && now - S.riseT < 80;
+    if (T.idx || S.pinch) {
+      ctx.strokeStyle = '#46d9ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 18, -PIE / 2, -PIE / 2 + Math.min(1, S.domT / .8) * PIE * 2); ctx.stroke();
+      if (pinchNow || S.domT > .8) { S.riseT = -1e9; S.domT = -1; btn.click(); beep(880, .05); }
+    }
+  }
+  document.querySelectorAll('.hbtn.hhover').forEach(b => { if (!hov.has(b)) b.classList.remove('hhover'); }); hov.forEach(b => b.classList.add('hhover'));
+}
+
+/* ================= helpers ================= */
+const dd = (a, b) => Math.hypot(a.x - b.x, a.y - b.y), clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const inRect = (x, y, r) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
+function coverFit(w, h) { const vw = videoEl.videoWidth || 16, vh = videoEl.videoHeight || 9, s = Math.max(w / vw, h / vh); return { dw: vw * s, dh: vh * s, ox: (w - vw * s) / 2, oy: (h - vh * s) / 2 }; }
+// mirror + smooth landmarks: fast moves follow quickly, small jitter is damped
+/* One Euro filter (Casiez, Roussel & Vogel, CHI 2012): heavy smoothing when a hand is still, almost no lag when it moves fast.
+   The idea comes from abouchedidxcode/open-source-hands (MIT licence); this is an independent implementation. */
+const oneEuro = (minCut = 1.6, beta = .012, dCut = 1) => {
+  let x = null, dx = 0; const alpha = (c, dt) => 1 / (1 + 1 / (2 * PIE * c * dt));
+  return (v, dt) => { if (x === null) { x = v; return v; } const d = (v - x) / dt; dx += alpha(dCut, dt) * (d - dx); x += alpha(minCut + beta * Math.abs(dx), dt) * (v - x); return x; };
+};
+function toScreen(l, fit, w, prev) {
+  const fresh = !(prev && prev.length === 21), o = fresh ? Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0, fx: oneEuro(), fy: oneEuro() })) : prev;
+  const now = performance.now(), dt = clamp((now - (o.t || now - 16)) / 1000, 1 / 240, .1); o.t = now;
+  for (let i = 0; i < 21; i++) {
+    const tx = w - (fit.ox + l[i].x * fit.dw), ty = fit.oy + l[i].y * fit.dh, p = o[i];
+    p.x = p.fx(tx, dt); p.y = p.fy(ty, dt); p.z = fresh ? l[i].z : p.z + (l[i].z - p.z) * .4;
+  }
+  return o;
+}
+const palm = p => ({ x: (p[0].x + p[5].x + p[9].x + p[13].x + p[17].x) / 5, y: (p[0].y + p[5].y + p[9].y + p[13].y + p[17].y) / 5 });
+function setRay(x, y, w, h, c = cam) { ndc.set(x / w * 2 - 1, -(y / h) * 2 + 1); ray.setFromCamera(ndc, c); }
+const proj = (v, c = bcam) => { const p = tmpC.copy(v).project(c); return { x: (p.x + 1) / 2 * width, y: (1 - p.y) / 2 * height }; };
+const hproj = (b, x, y, z) => proj(b.holder.localToWorld(tmpV.set(x, y, z)));
+function planePoint(x, y, z, w, h, c = bcam) { setRay(x, y, w, h, c); const o = ray.ray.origin, d = ray.ray.direction; return new THREE.Vector3().copy(o).addScaledVector(d, (z - o.z) / d.z); }
+const liveParts = () => rover.parts.filter(p => p.g.visible);
+function pickAt(x, y, w, h, meshes, r, c = cam) {
+  const o = [[0, 0]]; if (r) for (const rr of [r * .5, r]) for (let a = 0; a < 8; a++) o.push([Math.cos(a * PIE / 4) * rr, Math.sin(a * PIE / 4) * rr]);
+  for (const [ox, oy] of o) { setRay(x + ox, y + oy, w, h, c); const hit = ray.intersectObjects(meshes, false)[0]; if (hit) return hit.object; } return null;
+}
+function pickMesh(x, y, w, h, list, r = 0) { const meshes = []; for (const p of list) for (const m of p.g.children) meshes.push(m); return pickAt(x, y, w, h, meshes, r); }
+function readHand(p) {
+  const sz = dd(p[0], p[9]) || 1, L = i => dd(p[i], p[0]), cur = (t, i) => L(t) < L(i), ext = (t, i) => L(t) > L(i) * 1.15;
+  const rest = cur(16, 14) && cur(20, 18), idx = ext(8, 6);
+  let g = null;
+  if (rest && cur(8, 6) && cur(12, 10) && p[4].y < p[3].y - .15 * sz && p[4].y < p[0].y - .6 * sz) g = 'thumb';
+  else if (rest && cur(8, 6) && cur(12, 10) && dd(p[4], p[12]) < sz * .9) g = 'fist';
+  else if (rest && idx && ext(12, 10)) g = 'v';
+  return { sz, idx, spread: dd(p[4], p[20]) / sz, pinchD: dd(p[4], p[8]) / sz, point: rest && cur(12, 10) && idx, g, pp: { x: (p[4].x + p[8].x) / 2, y: (p[4].y + p[8].y) / 2 } };
+}
+// pinch with hysteresis (close below .46, open above .62) and a 3-frame grace period against flicker
+function updPinch(S, T, now) {
+  const was = S.pinch, raw = T.g === 'fist' ? false : was ? T.pinchD < .62 : T.pinchD < .46;
+  S.pc = raw ? 0 : S.pc + 1; S.pinch = raw || (was && S.pc < 3); if (S.pinch && !was) S.riseT = now;
+}
+function wrapLines(ctx, text, maxW) { const out = []; let cur = ''; for (const wd of String(text).split(' ')) { const t = cur ? cur + ' ' + wd : wd; if (ctx.measureText(t).width > maxW && cur) { out.push(cur); cur = wd; } else cur = t; } if (cur) out.push(cur); return out; }
+const fresh = (q, now) => q.pinch && !q.S.drag && now - q.S.riseT < 450;
+/* canvas controls in the bay: a press is a fresh pinch / click, or pointing and holding for .7 s */
+function uiHit(ptrs, items, now, dt) {
+  let fired = null;
+  for (const q of ptrs) {
+    const S = q.S; if (q.lost) { S.swKey = null; continue; }
+    const x = q.pinch ? q.px : q.x, y = q.pinch ? q.py : q.y, it = (q.point || q.pinch) ? items.find(r => !r.disabled && inRect(x, y, r)) : null;
+    if (!it) { if (items.some(r => r.id === S.swKey)) { S.swKey = null; S.swT = 0; } continue; }
+    let f = fresh(q, now); if (f) S.riseT = -1e9;
+    if (q.id !== 'm' && q.point && !q.pinch) { if (S.swKey === it.id) S.swT += dt; else S.swT = 0; if (S.swT > .7) { f = true; S.swT = -99; } }
+    S.swKey = it.id; if (f) fired = it.id;
+  }
+  return fired;
+}
+function uiSlider(ptrs, r, v, now, key) {
+  for (const q of ptrs) {
+    const S = q.S;
+    if (S.drag === key) { if (!q.pinch || q.lost) { S.drag = null; continue; } v = clamp((q.px - r.x) / r.w, 0, 1); }
+    else if (fresh(q, now) && q.px > r.x - 18 && q.px < r.x + r.w + 18 && Math.abs(q.py - (r.y + r.h / 2)) < 32) { S.drag = key; v = clamp((q.px - r.x) / r.w, 0, 1); }
+  }
+  return v;
+}
+const holdOf = id => Math.max(0, ...TS.map(S => S.swKey === id && S.swT > 0 ? S.swT / .7 : 0));
+
+/* ================= p5 loop ================= */
+function setup() { pixelDensity(1); createCanvas(innerWidth, innerHeight); frameRate(60); initGL(); }
+function windowResized() {
+  resizeCanvas(innerWidth, innerHeight); renderer.setSize(innerWidth, innerHeight);
+  for (const c of [cam, bcam]) { c.aspect = innerWidth / innerHeight; c.updateProjectionMatrix(); } bcam.updateMatrixWorld(); layoutBench(B);
+}
+function draw() {
+  const ctx = drawingContext, w = width, h = height, now = performance.now(), dt = Math.min(.05, (now - lastT) / 1000 || .016);
+  fps += ((1 / Math.max(.001, dt)) - fps) * .08; lastT = now; clear(); G.black = 0;
+  if (!started) return;
+  const fit = coverFit(w, h); let n = 0;
+  if (latest && latest.length) {
+    const hh = latest.slice(0, 2).map(l => ({ l, sx: w - (fit.ox + l[0].x * fit.dw) })).sort((a, b) => a.sx - b.sx);
+    if (hh.length === 2) { H[0] = toScreen(hh[0].l, fit, w, H[0]); H[1] = toScreen(hh[1].l, fit, w, H[1]); n = 2; }
+    else { const s = hh[0].sx < w / 2 ? 0 : 1; H[s] = toScreen(hh[0].l, fit, w, H[s]); H[1 - s] = null; n = 1; }
+  } else H[0] = H[1] = null;
+  const hi = n === 2 ? (G.swap ? 1 : 0) : (H[0] ? 0 : H[1] ? 1 : -1), ti = n === 2 ? 1 - hi : -1;
+  const hv = [H[0] ? readHand(H[0]) : null, H[1] ? readHand(H[1]) : null];
+  for (let s = 0; s < 2; s++) if (hv[s]) updPinch(TS[s], hv[s], now);
+
+  if (G.mode === 'select') {
+    selectScreen(ctx, w, h, now, dt, hv);
+    for (let s = 0; s < 2; s++) if (H[s]) drawHand(ctx, H[s], hv[s], 1, now, TS[s]);
+    return;
+  }
+  if (!rover) return;
+  if (G.mode === 'bench' && !G.panel) updateBench(dt, now, w, h, hv);
+  if (G.mode === 'bench') {
+    renderer.render(bscene, bcam);
+    if (H[0] && H[1]) drawCradle(ctx, H[0], H[1], now);
+    for (let s = 0; s < 2; s++) if (H[s]) drawHand(ctx, H[s], hv[s], 1, now, TS[s]);
+    benchHud(ctx, w, h, now);
+    G.black = Math.max(0, 1 - (now - B.openT) / 350);
+    domHands(ctx, hv, now, dt, [true, true]);
+  } else {
+    if (!Z.ph) updatePose(dt, w, h, hi, hv);
+    updateParts(dt, now);
+    const dp = dust.geometry.attributes.position.array;
+    for (let i = 0; i < 150; i++) { dp[i * 3 + 1] += dt * .12; dp[i * 3] += dt * .05; if (dp[i * 3 + 1] > 3) dp[i * 3 + 1] = -3; if (dp[i * 3] > 5) dp[i * 3] = -5; }
+    dust.geometry.attributes.position.needsUpdate = true;
+    scene.updateMatrixWorld(true);
+    if (Z.ph) zoomStep(now);
+    else if (!G.panel) {
+      for (let i = 0; i < 2; i++) interact(TS[i], (G.locked ? H[i] : i === ti) ? hv[i] : null, H[i], w, h, now, dt);
+      if (mouseLive(now) && !MS.rot) scanAt(TS[2], { x: MS.x, y: MS.y }, w, h, now, dt); else { TS[2].hover = null; TS[2].hoverQ = null; }
+    }
+    renderer.render(scene, cam);
+    for (let s = 0; s < 2; s++) if (H[s]) drawHand(ctx, H[s], hv[s], G.locked || G.panel ? 1 : s === hi ? 0 : 1, now, TS[s]);
+    hud(ctx, w, h, n, now);
+    domHands(ctx, hv, now, dt, G.panel || G.locked ? [true, true] : [ti === 0 || n === 1, ti === 1 || n === 1]);
+  }
+  if (G.black > .002) { ctx.fillStyle = 'rgba(3,5,9,' + G.black.toFixed(3) + ')'; ctx.fillRect(0, 0, w, h); }
+}
+
+/* ================= mission select ================= */
+function selectLayout(w, h) {
+  const cols = w > 980 ? 4 : 2, rows = 4 / cols, gap = 16, cw = Math.min(290, (w - 32 - gap * (cols - 1)) / cols);
+  const ch = rows === 1 ? Math.min(440, h - 170) : Math.min(380, (h - 140 - gap) / 2), tw = cols * cw + gap * (cols - 1), x0 = (w - tw) / 2, y0 = rows === 1 ? Math.max(110, (h - ch) / 2 + 30) : 100;
+  return MISSIONS.map((c, i) => ({ c, i, x: x0 + (i % cols) * (cw + gap), y: y0 + Math.floor(i / cols) * (ch + gap), w: cw, h: ch }));
+}
+function selectScreen(ctx, w, h, now, dt, hv) {
+  const L = selectLayout(w, h), visH = 2 * Math.tan(PIE * 25 / 180) * 6;
+  L.forEach((c, i) => {
+    const pv = previews[i], p = planePoint(c.x + c.w / 2, c.y + c.h * .27, 0, w, h, cam), size = Math.min(c.w, c.h * .45) / h * visH * .9;
+    pv.position.copy(p); pv.scale.setScalar(size / pv.userData.size); pv.rotation.y = now / 2400 + i;
+  });
+  renderer.render(sscene, cam);
+  let any = -1;
+  for (let s = 0; s < 2; s++) {
+    const T = hv[s]; if (!T) { G.selT[s] = 0; continue; } const P = H[s];
+    const c = T.idx ? L.find(c => inRect(P[8].x, P[8].y, c)) : null;
+    if (c && G.selI[s] === c.i) { G.selT[s] += dt; if (G.selT[s] > .9 || (TS[s].pinch && now - TS[s].riseT < 80)) { chooseMission(c.i); return; } } else { G.selI[s] = c ? c.i : -1; G.selT[s] = 0; }
+    if (c) any = c.i;
+  }
+  const F = (px, wt = 400) => FONT(ctx, px, wt);
+  ctx.textAlign = 'center'; F(28, 300); ctx.fillStyle = '#fff'; ctx.fillText('Choose a rover to investigate', w / 2, 50);
+  F(14); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText(G.mouseOnly ? 'Click a mission (or press 1 to 4)' : 'Point at a mission and hold, or pinch it (keys 1 to 4 also work)', w / 2, 76);
+  const hoverM = G.mouseOnly || now - MS.t < 4000 ? L.find(c => inRect(MS.x, MS.y, c)) : null;
+  L.forEach(c => {
+    const hot = any === c.i || (hoverM && hoverM.i === c.i), C = c.c, bt = best[C.id];
+    ctx.fillStyle = C.accent; ctx.fillRect(c.x, c.y, c.w, 4);
+    ctx.strokeStyle = hot ? '#ffb000' : 'rgba(70,217,255,.35)'; ctx.lineWidth = hot ? 2 : 1; ctx.strokeRect(c.x + .5, c.y + .5, c.w, c.h);
+    const ty = c.y + c.h * .55; ctx.fillStyle = 'rgba(5,9,16,.85)'; ctx.fillRect(c.x + 1, ty - 26, c.w - 1, c.y + c.h - ty + 25);
+    ctx.textAlign = 'left'; F(11, 700); ctx.fillStyle = C.accent; ctx.fillText('MISSION ' + (c.i + 1) + ' · ' + C.env, c.x + 14, c.y + 24);
+    F(19, 600); ctx.fillStyle = '#fff'; wrapLines(ctx, C.name, c.w - 28).slice(0, 2).forEach((ln, k) => ctx.fillText(ln, c.x + 14, ty + k * 22));
+    const yy = ty + (ctx.measureText(C.name).width > c.w - 28 ? 44 : 22);
+    F(12); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText(C.years + ' · ' + C.where, c.x + 14, yy);
+    F(13); ctx.fillStyle = 'rgba(219,234,242,.92)'; wrapLines(ctx, C.card, c.w - 28).slice(0, 4).forEach((ln, k) => ctx.fillText(ln, c.x + 14, yy + 22 + k * 18));
+    F(12, 600); ctx.fillStyle = C.accent; ctx.fillText('Challenge: ' + C.challenge, c.x + 14, c.y + c.h - (bt ? 30 : 14));
+    if (bt) { F(11); ctx.fillStyle = 'rgba(93,255,158,.8)'; ctx.fillText('Completed · best ' + Math.round(bt.secs) + ' s', c.x + 14, c.y + c.h - 12); }
+    for (let s = 0; s < 2; s++) if (G.selI[s] === c.i && G.selT[s] > 0) { ctx.fillStyle = 'rgba(255,176,0,.6)'; ctx.fillRect(c.x, c.y + c.h - 4, c.w * Math.min(1, G.selT[s] / .9), 4); }
+  });
+  F(12); ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText('Mission information from NASA. Models are simplified illustrations.', w / 2, h - 14);
+}
+
+/* ---- pose: the holding hand carries the rover ---- */
+function setLock(v) {
+  if (G.locked === v) return; G.locked = v; G.still = 0; G.travel = 0; G.armed = false; G.sig = null;
+  toast(v ? 'Locked: scan it with both hands' : 'Unlocked: hold it with one hand'); arp(v ? [660, 880] : [880, 660]); setBar();
+}
+function updatePose(dt, w, h, hi, hv) {
+  const testing = rover.testT && !rover.end, ek = f => 1 - Math.exp(-dt * f);
+  if (!G.locked && !G.panel) {
+    let cx = w / 2, cy = h * .45, roll = 0, pitch = .35, ex = 0, s = .55, yt = rover.yaw;
+    if (hi >= 0) {
+      const p = H[hi], c = palm(p), k = hv[hi], zr = p[17].x > p[5].x ? p[17].z : p[5].z, zl = p[17].x > p[5].x ? p[5].z : p[17].z;
+      cx = c.x; cy = c.y - k.sz * 1.15; s = clamp(k.sz / h * 3.2, .36, .8);
+      roll = clamp(-(Math.atan2(p[9].y - p[0].y, p[9].x - p[0].x) + PIE / 2), -1.3, 1.3);
+      yt = clamp(-(zr - zl) * 7, -1.3, 1.3); pitch = clamp(.35 + (p[9].z - p[0].z) * 6, -.9, 1.1);
+      ex = G.lock ? 1 : clamp((k.spread - 1.25) / .5, 0, 1);
+      const sig = [c.x / k.sz, c.y / k.sz, roll * 2, pitch * 2, yt * 2, ex * 2];
+      if (G.sig) { const d = Math.hypot(...sig.map((v, i) => v - G.sig[i])); G.travel += d; G.still = d < .04 ? G.still + dt : 0; if (G.travel > 1.5) G.armed = true; }
+      G.sig = sig; if (G.auto && G.armed && G.still > .8) setLock(true);
+    } else {
+      G.sig = null; G.still = 0;
+      if (performance.now() - MS.t > 3000 && !TS[2].hover) rover.yaw += dt * .4;
+      yt = rover.yaw; pitch = G.mpitch; ex = G.lock ? 1 : 0;
+    }
+    G.tg = { cx, cy, roll, pitch, ex, s, yt };
+  } else if (G.panel && !G.locked) { rover.yaw += dt * .25; if (G.tg) G.tg.yt = rover.yaw; }
+  const T = G.tg || { cx: w / 2, cy: h * .45, roll: 0, pitch: .35, ex: 0, s: .55, yt: rover.yaw }, ex = testing ? 0 : T.ex;
+  tmpV.set(T.cx / w * 2 - 1, -(T.cy / h) * 2 + 1, .5).unproject(cam).sub(cam.position).normalize().multiplyScalar(6).add(cam.position);
+  rover.g.position.lerp(tmpV, ek(16)); rover.yaw += (T.yt - rover.yaw) * ek(10);
+  rover.roll += (T.roll - rover.roll) * ek(12); rover.pitch += (T.pitch - rover.pitch) * ek(10); rover.ex += (ex - rover.ex) * ek(8); rover.s += (T.s - rover.s) * ek(10);
+  rover.g.rotation.set(rover.pitch, rover.yaw, rover.roll); rover.g.scale.setScalar(rover.s * rover.C.k);
+}
+
+/* ---- parts: explode, live behaviour, guidance glow ---- */
+function updateParts(dt, now) {
+  const t = now / 1000, pulse = .3 + .3 * Math.sin(t * 6), hintOn = now - G.hintT < 3000, testing = rover.testT && !rover.end, cur = currentTask();
+  rover.rings[1].rotation.z += dt * .6; rover.rings[0].material.color.setHex(G.locked ? 0x5dff9e : 0x46d9ff);
+  for (const p of rover.parts) {
+    const k = p.def.kind, pend = pendingTask(p);
+    p.g.position.copy(socketLocal(p)); p.g.rotation.set(0, 0, 0);
+    if (testing && rover.C.env === 'MOON' && k === 'wheel') p.g.rotation.z = -t * 8;
+    let r = 0, g = 0, b = 0;
+    if (G.thermal) { if (pend && !pend.optional) { r = .9 * (.6 + pulse); g = .3; } else { b = .3; g = .08; } }
+    else if (cur && cur.p === p) { g = .25 * (.5 + pulse); b = .35 * (.5 + pulse); if (hintOn) { r = g = b = .7 * (.5 + pulse); } }
+    else if (pend && pend.optional && unlocked(pend)) { r = .25 * pulse; g = .12 * pulse; }
+    if (isHover(p)) { g += .3; b += .4; }
+    for (const m of p.mats) if (m.emissive) m.emissive.setRGB(r, g, b);
+  }
+  if (testing && now - rover.testT > (rover.C.env === 'MOON' ? 3000 : 900)) { rover.parts.forEach(p => p.g.rotation.set(0, 0, 0)); finish(now); }
+}
+function finish(now) { rover.end = now; rover.testT = 0; arp([523, 659, 784, 1047]); showConclusion(); }
+function fx(wp) { const v = wp.clone().project(cam); G.fx.push({ x: (v.x + 1) / 2 * width, y: (1 - v.y) / 2 * height, t: performance.now() }); }
+
+/* ---- scanning (tool hand or mouse) ---- */
+function scanPart(p) {
+  const t = availableTask(p), pend = pendingTask(p), cur = currentTask();
+  if (!p.scanned) beep(t ? 200 : 880, .08, t ? 'square' : 'sine');
+  p.scanned = true;
+  if (t) toast((t.optional ? 'Optional ' : '') + LABEL[t.label][0].toLowerCase() + ': ' + t.title);
+  else if (pend && cur) toast(lname(p.def) + ': later. First: ' + cur.title);
+  else toast(lname(p.def) + ': ' + p.def.info);
+}
+function scanAt(S, q, w, h, now, dt) {
+  S.hover = null; S.hoverQ = null; let key = null;
+  if (q && !rover.end && !rover.testT) { const m = pickMesh(q.x, q.y, w, h, liveParts(), 18); if (m) { S.hover = m.userData.part; key = S.hover; S.hoverQ = { x: q.x, y: q.y }; } }
+  if (key) {
+    S.hoverT = key === S.lastKey ? S.hoverT + dt : 0;
+    if (S.hoverT > .45 && !S.scannedKey) { S.scannedKey = key; scanPart(key); const t = availableTask(key); if (t) { enterBench(key, t); S.hoverT = 0; } }
+  } else S.hoverT = 0;
+  if (key !== S.lastKey) S.scannedKey = null;
+  S.lastKey = key;
+}
+function interact(S, T, P, w, h, now, dt) {
+  if (!T) { S.g = null; S.hoverT = 0; S.lastKey = null; S.hover = null; S.hoverQ = null; return; }
+  if (T.g !== S.g) { S.g = T.g; S.t = now; S.fired = false; }
+  if (T.g && !S.fired && now - S.t >= (T.g === 'v' ? 900 : 1000)) {
+    S.fired = true;
+    if (T.g === 'v') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); beep(660, .1); } else if (T.g === 'fist') hint();
+  }
+  scanAt(S, T.point ? P[8] : null, w, h, now, dt);
+}
+
+/* ================= zoom transition ================= */
+function enterBench(p, task) {
+  if (Z.ph || G.mode === 'bench') return;
+  const now = performance.now();
+  Z.ph = 'in'; Z.t0 = now; Z.p = p; Z.task = task; Z.done = false; Z.wp = p.g.getWorldPosition(new THREE.Vector3());
+  Z.tgt = Z.wp.clone().add(HOME.clone().sub(Z.wp).normalize().multiplyScalar(1.5));
+  TS.forEach(S => { S.hover = null; S.hoverQ = null; S.hoverT = 0; });
+  beep(300, .3, 'sine', .05); beep(600, .25, 'sine', .05, .12);
+}
+function zoomStep(now) {
+  if (Z.ph === 'in') {
+    const k = clamp((now - Z.t0) / 650, 0, 1), e = k * k * (3 - 2 * k);
+    cam.position.lerpVectors(HOME, Z.tgt, e); cam.lookAt(tmpV.copy(Z.wp).multiplyScalar(e));
+    G.black = clamp((k - .45) / .55, 0, 1);
+    if (k >= 1) openBench(Z.p, Z.task, now);
+  } else if (Z.ph === 'out') {
+    const k = clamp((now - Z.t0) / 700, 0, 1), e = 1 - Math.pow(1 - k, 3);
+    cam.position.lerpVectors(Z.tgt, HOME, e); cam.lookAt(tmpV.copy(Z.wp).multiplyScalar(1 - e));
+    G.black = 1 - clamp(k / .45, 0, 1);
+    if (k >= 1) { Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0); if (Z.done) { fx(Z.p.g.getWorldPosition(new THREE.Vector3())); showCard(Z.task); } }
+  }
+}
+function openBench(p, task, now) {
+  Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0);
+  B = task.bench || (task.bench = makeBench(p, task, now)); bscene.add(B.root); layoutBench(B); B.openT = now; G.mode = 'bench';
+  videoEl.style.opacity = '.14'; glEl.style.background = bayBackground();
+  TS.forEach(S => { S.drag = null; S.tk = null; S.wl = []; S.swKey = null; });
+  setBar();
+}
+function exitBench(done, now = performance.now()) {
+  if (!B) return; const b = B, p = b.p, task = b.task;
+  TS.forEach(S => { S.drag = null; S.tk = null; S.wl = []; S.swKey = null; });
+  if (b.unit && b.unit.g.parent === b.root) { b.unit.held = null; homeTween(b, b.unit.g, b.holder); }
+  b.rack.forEach(it => it.held = null);
+  const st = b.steps[b.si]; if (st && st.items && st.t === 'assemble') st.items.forEach(it => { if (it.held) { it.held = null; sendHome(b, it); } });
+  if (st && st.rocks) st.rocks.forEach(r => r.held = null);
+  bscene.remove(b.root); B = null; G.mode = 'main'; hidePanel();
+  videoEl.style.opacity = ''; glEl.style.background = '';
+  if (done) {
+    task.done = true; task.bench = null; arp([523, 659, 784]);
+    if (task.recipe === 'a17_fender') { const m = new THREE.Mesh(new BoxG(.3, .22, .01), new THREE.MeshStandardMaterial({ color: 0xd9d3b8, roughness: .8 })); m.position.set(-.36, .36, .05); m.rotation.z = .785; p.g.add(m); m.userData.part = p; }
+    if (task.recipe === 'opp_comm') G.storm = .15;
+  } else toast('Paused. Scan the part again to carry on');
+  setEnv(G.env); setBar();
+  Z.ph = 'out'; Z.t0 = now; Z.p = p; Z.task = task; Z.done = done; Z.wp = p.g.getWorldPosition(new THREE.Vector3());
+  Z.tgt = Z.wp.clone().add(HOME.clone().sub(Z.wp).normalize().multiplyScalar(1.5));
+  TS.forEach(S => { S.lastKey = p; S.scannedKey = p; S.hoverT = 0; });   // no instant re-entry while still pointing at it
+}
+
+/* ================= repair bay ================= */
+function makeBench(p, task, now) {
+  const R = RECIPES[task.recipe], C = rover.C, def = R.unitDef ? R.unitDef(C, p) : p.def;
+  const root = new THREE.Group(), holder = new THREE.Group(); root.add(holder);
+  holder.rotation.set(...R.rot);
+  const b = { p, task, C, def, R, root, holder, si: -1, tw: [], bolts: [], rack: [], dust: [], p2: [], done: false, bin: new THREE.Vector3(), S: R.scale, openT: now, hook: null, hookTension: 0, tapeOn: null };
+  if (R.mount) { const mg = new THREE.Group(), bl = builder(mg, [], false); R.mount(bl.add, bl.M); holder.add(mg); }
+  b.unit = makePart(def, 'normal'); b.unit.broken = true; holder.add(b.unit.g);
+  b.ghost = makePart(def, 'ghost'); b.ghost.g.visible = false; holder.add(b.ghost.g);
+  (R.dust || []).forEach(d => b.dust.push(makeDust(b, d)));
+  if (R.extra) R.extra(b);
+  (R.bolts && !R.boltStyle ? R.bolts : []).forEach(s => b.bolts.push(makeBolt(b, s, false)));
+  b.steps = R.steps.map(s => Object.assign({}, s, { done: false }));
+  layoutBench(b); nextStep(b, now);
+  return b;
+}
+function layoutBench(b) {
+  if (!b) return;
+  const hh = Math.tan(PIE * 25 / 180) * 6, hw = hh * bcam.aspect, f = Math.min(1, bcam.aspect / 1.5);
+  b.hw = hw; b.hh = hh;
+  b.S = b.R.scale * f; b.holder.scale.setScalar(b.S); b.holder.position.set(b.R.pos[0] * f, b.R.pos[1] * f, 0);
+  b.bin.set(-hw * .76, -hh * .58, 0);
+  b.rack.forEach((it, i) => it.slot.set(hw * .76, ((b.rack.length - 1) / 2 - i) * 1.35 * Math.max(f, .7) + .15, 0));
+  if (b.knob) b.knob.position.set(hw * .48, -hh * .42, .3);
+}
+function nextStep(b, now) {
+  b.si++; TS.forEach(S => { S.tk = null; if (typeof S.drag === 'string') S.drag = null; }); b.hook = null; b.hookTension = 0; b.tapeOn = null;
+  if (b.si >= b.steps.length) { b.done = true; b.doneT = now; b.unit.broken = false; arp([523, 659, 784, 1047]); return; }
+  const st = b.steps[b.si], fn = STEP[st.t].begin; st.t0 = now; if (fn) fn(b, st, now);
+}
+function pivotOf(b, test, center) {
+  b.root.updateMatrixWorld(true); const piv = new THREE.Group(); piv.position.copy(center); b.unit.g.add(piv); b.unit.g.updateMatrixWorld(true);
+  b.unit.g.children.filter(m => m !== piv && m.isMesh && test(m)).forEach(m => piv.attach(m)); return piv;
+}
+
+/* ---- objects in the bay ---- */
+function makeBolt(b, spec, raised) {
+  const r = b.R.boltR || .036, g = new THREE.Group(), spin = new THREE.Group(); g.add(spin);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xc9d1d8, metalness: .9, roughness: .28 });
+  if (b.R.boltStyle === 'clamp') {   // a clamp screw with a T-bar handle and a jaw
+    const bar = new THREE.Mesh(new BoxG(r * 5, r * .8, r * .8), mat); bar.position.y = r * 1.1; spin.add(bar);
+    spin.add(new THREE.Mesh(new CylG(r * .45, r * .45, r * 2.4, 8), mat));
+    const jaw = new THREE.Mesh(new BoxG(r * 3, r * .6, r * 3), new THREE.MeshStandardMaterial({ color: 0x4a4f57, metalness: .6, roughness: .5 })); jaw.position.y = -r * 1.4; g.add(jaw);
+  } else {
+    const head = new THREE.Mesh(new CylG(r, r, r * .9, 6), mat); head.position.y = r * .55; spin.add(head);
+    const wash = new THREE.Mesh(new CylG(r * 1.4, r * 1.4, r * .2, 18), mat); wash.position.y = r * .1; spin.add(wash);
+  }
+  const shaft = new THREE.Mesh(new CylG(r * .5, r * .5, r * 3, 10), new THREE.MeshStandardMaterial({ color: 0x8e979f, metalness: .9, roughness: .4 })); shaft.position.y = -r * 1.5; spin.add(shaft);
+  g.quaternion.setFromUnitVectors(YAX, spec.a);
+  const bo = { g, spin, mat, seat: spec.p.clone(), a: spec.a.clone(), prog: 0, done: false, wrong: 0, wrongT: 0, raised, L: r * 3.2, act: false };
+  poseBolt(bo); b.holder.add(g); return bo;
+}
+function poseBolt(bo) {
+  const lift = bo.raised ? (1 - bo.prog) * bo.L : bo.prog * bo.L;
+  bo.g.position.copy(bo.seat).addScaledVector(bo.a, lift); bo.spin.rotation.y = (bo.raised ? -1 : 1) * bo.prog * 10;
+  if (!bo.done) bo.mat.emissive.setHex(bo.act ? 0x664000 : 0);
+}
+function makeDust(b, d) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = Math.max(8, Math.round(256 * d.size[1] / d.size[0]));
+  const c = cv.getContext('2d'), W = cv.width, Hh = cv.height, col = d.sand ? '170,112,70' : '172,116,70';
+  c.fillStyle = 'rgba(' + col + ',.95)'; c.fillRect(0, 0, W, Hh);
+  for (let i = 0; i < 14; i++) { c.fillStyle = 'rgba(120,78,46,.35)'; c.fillRect(Math.random() * W, Math.random() * Hh, 20 + Math.random() * 60, 3 + Math.random() * 5); }
+  for (let i = 0; i < W * Hh / 40; i++) { const x = Math.random() * W, y = Math.random() * Hh;
+    c.fillStyle = `rgba(${110 + Math.random() * 90 | 0},${70 + Math.random() * 50 | 0},${40 + Math.random() * 30 | 0},${(.3 + Math.random() * .6).toFixed(2)})`; c.fillRect(x, y, 2, 2); }
+  const tex = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(d.size[0], d.size[1]), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(...d.at); m.rotation.set(...d.rot); m.userData.dust = true; b.unit.g.add(m);
+  const o = { m, cv, c, tex, init: 1, k: 1 }; o.init = Math.max(1, opaque(o)); return o;
+}
+function opaque(o) { const d = o.c.getImageData(0, 0, o.cv.width, o.cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 16) if (d[i] > 60) n++; return n; }
+function wipeStroke(o, a, bb, r, s) {
+  const c = o.c; c.save(); c.globalCompositeOperation = 'destination-out'; c.strokeStyle = 'rgba(0,0,0,' + s.toFixed(3) + ')'; c.lineWidth = r * 2; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(bb.x + .01, bb.y); c.stroke(); c.restore(); o.tex.needsUpdate = true;
+}
+function makeKnob(b) {
+  const k = new THREE.Group(), sp = new THREE.Group(); k.add(sp);
+  const base = new THREE.Mesh(new CylG(.42, .42, .1, 40), new THREE.MeshStandardMaterial({ color: 0x25282d, metalness: .5, roughness: .6 })); base.rotation.x = PIE / 2; k.add(base);
+  const capM = new THREE.MeshStandardMaterial({ color: 0xaeb7bf, metalness: .85, roughness: .3 });
+  const cap = new THREE.Mesh(new CylG(.32, .34, .18, 32), capM); cap.rotation.x = PIE / 2; cap.position.z = .1; sp.add(cap);
+  for (let i = 0; i < 18; i++) { const a = i / 18 * PIE * 2, r = new THREE.Mesh(new BoxG(.05, .06, .2), capM); r.position.set(Math.cos(a) * .33, Math.sin(a) * .33, .1); r.rotation.z = a; sp.add(r); }
+  const mk = new THREE.Mesh(new BoxG(.05, .2, .03), new THREE.MeshBasicMaterial({ color: 0xffb000 })); mk.position.set(0, .18, .2); sp.add(mk);
+  b.knob = k; b.knobSpin = sp; b.root.add(k); return k;
+}
+/* aim something at a target by turning a knob: a pivot in the unit rotates about the screen axis.
+   With `limit`, the pivot cannot get closer than `limit` radians to the target (Spirit could not tilt enough). */
+function tuneSetup(b, o) {
+  b.tn = o; const piv = pivotOf(b, () => true, o.pc);
+  if (o.ground != null) { const gm = new THREE.Mesh(new BoxG(3.4, .12, 2.2), new THREE.MeshStandardMaterial({ color: 0xb5875a, roughness: 1 })); gm.position.set(0, o.ground - o.pc.y, 0); piv.add(gm); }
+  b.piv = piv;
+  const tgt = new THREE.Mesh(new SphG(.09, 18, 12), new THREE.MeshStandardMaterial({ color: o.color, emissive: o.emissive, roughness: .6 }));
+  const dc0 = o.dc.clone().sub(o.pc).applyAxisAngle(ZAX, o.base).add(o.pc); tgt.position.copy(dc0).addScaledVector(o.n0.clone().applyAxisAngle(ZAX, o.base), o.dist); b.holder.add(tgt); b.target = tgt;
+  makeKnob(b);
+  b.e0 = (Math.random() < .5 ? -1 : 1) * (o.min + Math.random() * (o.max - o.min)); b.k = 0; b.err = b.e0; b.tick = 0; piv.rotation.z = o.base - b.err;
+}
+function tweenTo(b, g, parent, pos, rz, s, then) {
+  if (g.parent !== parent) parent.attach(g);
+  const id = ++twId; g.userData.tw = id; const q = new THREE.Quaternion().setFromAxisAngle(ZAX, rz);
+  b.tw.push(() => {
+    if (g.userData.tw !== id) return true;
+    g.position.lerp(pos, .22); g.quaternion.slerp(q, .22); g.scale.setScalar(g.scale.x + (s - g.scale.x) * .22);
+    if (g.position.distanceTo(pos) < .004 && Math.abs(s - g.scale.x) < .004) { g.position.copy(pos); g.quaternion.copy(q); g.scale.setScalar(s); if (then) then(); return true; }
+    return false;
+  });
+}
+const homeTween = (b, g, parent) => tweenTo(b, g, parent, V(0, 0, 0), 0, 1);
+function scrapTween(b, g, toBin) {
+  if (g.parent !== b.root) b.root.attach(g);
+  const id = ++twId; g.userData.tw = id; const t0 = performance.now(), from = g.position.clone(), s0 = g.scale.x;
+  b.tw.push(() => {
+    const k = Math.min(1, (performance.now() - t0) / 450);
+    if (toBin) g.position.lerpVectors(from, b.bin, k * k);
+    g.scale.setScalar(s0 * (1 - k)); g.rotation.z += .12;
+    if (k >= 1) { b.root.remove(g); return true; } return false;
+  });
+}
+/* screen-space particles (dust and sand) */
+function emitDust(b, x, y, n, vx0, vx1, vy0, vy1, col) { for (let i = 0; i < n && b.p2.length < 500; i++) b.p2.push({ x, y, vx: vx0 + Math.random() * (vx1 - vx0), vy: vy0 + Math.random() * (vy1 - vy0), life: 0, col, high: false }); }
+function stepDust(b, dt, g, floorY, seatY) {
+  for (const p of b.p2) { p.vy += g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life += dt; if (seatY != null && p.y < seatY) p.high = true; if (p.y > floorY && p.vy > 0) p.dead = true; if (p.life > 3.5) p.dead = true; }
+  const dead = b.p2.filter(p => p.dead); b.p2 = b.p2.filter(p => !p.dead); return dead;
+}
+
+/* ---- input in the bay: both hands are tools, plus the mouse ---- */
+function benchPointers(hv, now, dt) {
+  const out = [];
+  for (let s = 0; s < 2; s++) {
+    const S = TS[s];
+    if (H[s] && hv[s]) {
+      const P = H[s], T = hv[s]; S.lostT = 0; S.lostFired = false;
+      out.push({ id: s, S, x: P[8].x, y: P[8].y, px: T.pp.x, py: T.pp.y, pinch: S.pinch, point: T.idx && !S.pinch,
+        roll: Math.atan2(P[9].y - P[0].y, P[9].x - P[0].x), wipe: S.pinch ? [] : [palm(P), P[8], P[12], P[16]] });
+      S.lx = T.pp.x; S.ly = T.pp.y;
+    } else {
+      S.pinch = false; S.lostT += dt;
+      // tracking lost: after a short grace period, drop whatever the hand held (never counts as a placement)
+      if (S.lostT > .35 && !S.lostFired) { S.lostFired = true; S.tk = null; out.push({ id: s, S, lost: true, x: S.lx, y: S.ly, px: S.lx, py: S.ly, pinch: false, point: false, roll: null, wipe: [] }); }
+    }
+  }
+  if (mouseLive(now)) out.push({ id: 'm', S: TS[2], x: MS.x, y: MS.y, px: MS.x, py: MS.y, pinch: MS.down, point: true, roll: null, wipe: MS.down ? [{ x: MS.x, y: MS.y }] : [] });
+  return out;
+}
+/* turning: pinch near the target and twist the wrist (wrench grip), or point and circle it with a fingertip / the mouse.
+   Positive delta = clockwise on screen. */
+function turnTargets(targets, ptrs, R, apply) {
+  for (const t of targets) if (typeof t.key === 'object') t.key.act = false;
+  targets.act = false;
+  for (const q of ptrs) {
+    const S = q.S; if (q.lost) { S.tk = null; continue; }
+    const wrench = q.pinch && q.roll != null;
+    let t = targets.find(u => u.key === S.tk);
+    if (t) { if (wrench ? S.tm !== 'w' : (S.tm !== 'c' || !q.point || Math.hypot(q.x - t.x, q.y - t.y) > R * 2.6)) { S.tk = null; t = null; } }
+    // fingertip has clearly moved onto a different target: switch to it
+    if (t && !wrench && Math.hypot(q.x - t.x, q.y - t.y) > R && targets.some(u => u !== t && Math.hypot(q.x - u.x, q.y - u.y) < R * .6)) { S.tk = null; t = null; }
+    if (!t) {
+      if (!wrench && !q.point) continue;
+      const cx = wrench ? q.px : q.x, cy = wrench ? q.py : q.y; let bestT = null, bd = R;
+      for (const u of targets) { const d = Math.hypot(cx - u.x, cy - u.y); if (d < bd && !TS.some(o => o !== S && o.tk === u.key)) { bd = d; bestT = u; } }
+      if (bestT) { S.tk = bestT.key; S.tm = wrench ? 'w' : 'c'; S.ta = wrench ? q.roll : Math.atan2(q.y - bestT.y, q.x - bestT.x); if (typeof bestT.key === 'object') bestT.key.act = true; targets.act = true; }
+      continue;
+    }
+    const a = wrench ? q.roll : Math.atan2(q.y - t.y, q.x - t.x);
+    let d = a - S.ta; d = Math.atan2(Math.sin(d), Math.cos(d)); S.ta = a;
+    if (typeof t.key === 'object') t.key.act = true; targets.act = true;
+    if (!wrench && Math.hypot(q.x - t.x, q.y - t.y) < 10) continue;
+    if (Math.abs(d) < 1) apply(t, d);
+  }
+}
+const NEED = 3.4;   // radians of turning per bolt
+function boltWork(b, ptrs, dir, now) {
+  const live = b.bolts.filter(bo => !bo.done);
+  const tg = live.map(bo => { const s = proj(bo.g.getWorldPosition(tmpV)); return { key: bo, x: s.x, y: s.y }; });
+  turnTargets(tg, ptrs, 52, (t, d) => {
+    const bo = t.key, good = d * dir;
+    if (good > 0) { const before = bo.prog; bo.prog = Math.min(1, bo.prog + good / NEED); bo.wrong = 0; if ((bo.prog * 8 | 0) !== (before * 8 | 0)) beep(1400, .02, 'square', .025); }
+    else { bo.wrong += -good; if (bo.wrong > .5) { bo.wrongT = now; bo.wrong = 0; } }
+  });
+  for (const bo of live) {
+    poseBolt(bo);
+    if (bo.prog >= 1) {
+      bo.done = true; bo.mat.emissive.setHex(0);
+      if (dir < 0) { beep(520, .1); const g = bo.g, id = ++twId; g.userData.tw = id; let t = 0;
+        b.tw.push(() => { t += .016; g.position.addScaledVector(bo.a, .012); g.scale.setScalar(Math.max(0, 1 - t / .35)); if (t > .35) { b.holder.remove(g); return true; } return false; }); }
+      else { bo.mat.color.setHex(0x5dff9e); beep(900, .06); beep(1300, .08, 'sine', .06, .07); }
+    }
+  }
+  return b.bolts.every(bo => bo.done);
+}
+/* a step that is driven by grabbing one 2D/3D handle and moving it (T-handle, wheel drag) */
+function grabHandle(st, ptrs, tp, now, r = 90) {
+  let held = null;
+  for (const q of ptrs) {
+    const S = q.S;
+    if (S.drag === st) { if (!q.pinch) { S.drag = null; continue; } held = q; }
+    else if (fresh(q, now) && !ptrs.some(o => o.S.drag === st) && Math.hypot(q.px - tp.x, q.py - tp.y) < r) { S.drag = st; st.bx = q.px; st.by = q.py; held = q; beep(520, .06); }
+  }
+  st.held = !!held; return held;
+}
+
+/* ---- Apollo 15 map (simplified; distances and rates are game values) ---- */
+const A15 = {
+  kmW: 12, kmH: 12 / 1.35, lm: { id: 'lm', name: 'Falcon (Lunar Module)', x: .47, y: .47 }, speed: 8, roughSpeed: 5, stopH: 50 / 60, evaH: 7, walk: 2.7, reserve: .5, battPerKm: 2.2, minBatt: 25, minSci: 6,
+  stations: [
+    { id: 'elbow', name: 'Elbow (Hadley Rille)', x: .29, y: .68, sci: 2, rille: true, note: 'Rim of Hadley Rille: lava rocks and soil' },
+    { id: 'stg', name: 'St. George crater', x: .36, y: .86, sci: 2, note: 'Slope of Hadley Delta: impact breccias' },
+    { id: 'spur', name: 'Spur crater', x: .55, y: .84, sci: 3, note: 'Where the Genesis Rock was found' },
+    { id: 'dune', name: 'Dune crater', x: .53, y: .62, sci: 1, note: 'Lava boulders on the valley floor' },
+    { id: 'rilleN', name: 'Rille rim (north)', x: .22, y: .38, sci: 2, rille: true, note: 'Layers of lava exposed in the rille wall' },
+    { id: 'nc', name: 'North Complex', x: .68, y: .14, sci: 3, note: 'Planned for the third moonwalk but dropped to save time' }],
+  craters: [[.4, .58, .035], [.5, .73, .03], [.34, .5, .028], [.6, .42, .04], [.62, .27, .045], [.44, .79, .03]],
+  rille: [[.01, .02], [.1, .18], [.16, .3], [.12, .44], [.2, .58], [.25, .7], [.22, .83], [.28, .98]],
+};
+const kmPt = p => ({ x: p.x * A15.kmW, y: p.y * A15.kmH });
+function legKm(a, c) {
+  const A = kmPt(a), C = kmPt(c), dx = C.x - A.x, dy = C.y - A.y, L2 = dx * dx + dy * dy || 1; let rough = 0;
+  for (const [cx, cy, r] of A15.craters) { const P = kmPt({ x: cx, y: cy }), u = clamp(((P.x - A.x) * dx + (P.y - A.y) * dy) / L2, 0, 1); if (Math.hypot(A.x + dx * u - P.x, A.y + dy * u - P.y) < r * A15.kmW) rough++; }
+  return { d: Math.hypot(dx, dy) * (1 + .3 * rough), rough };
+}
+function evalRoute(ids) {
+  const stops = ids.map(id => A15.stations.find(s => s.id === id)), pts = [A15.lm, ...stops, A15.lm];
+  let t = 0, km = 0, rough = 0, worst = 99, worstAt = '';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const L = legKm(pts[i], pts[i + 1]); km += L.d; rough += L.rough; t += L.d / (L.rough ? A15.roughSpeed : A15.speed);
+    if (i < pts.length - 2) { t += A15.stopH; const walkH = Math.hypot(kmPt(pts[i + 1]).x - kmPt(A15.lm).x, kmPt(pts[i + 1]).y - kmPt(A15.lm).y) / A15.walk, m = A15.evaH - t - walkH - A15.reserve; if (m < worst) { worst = m; worstAt = pts[i + 1].name; } }
+  }
+  const batt = 100 - km * A15.battPerKm, sci = stops.reduce((a, s) => a + s.sci, 0), problems = [];
+  if (!stops.length) problems.push('Add at least one stop.');
+  else {
+    if (!stops.some(s => s.rille)) problems.push('Visit Hadley Rille: the Elbow or the north rille rim.');
+    if (sci < A15.minSci) problems.push('Science: ' + sci + ' points. Aim for at least ' + A15.minSci + '.');
+    if (A15.evaH - t < A15.reserve) problems.push('Life support: this moonwalk would take ' + t.toFixed(1) + ' h. The backpacks allow ' + A15.evaH + ' h with a 30-minute reserve.');
+    if (worst < 0) problems.push('Walkback limit broken at ' + worstAt + ': if the rover failed there, the crew could not walk back before their oxygen reserve ran low.');
+    if (batt < A15.minBatt) problems.push('Battery would fall to ' + Math.round(batt) + '%. Keep at least ' + A15.minBatt + '% in reserve.');
+  }
+  return { km, t, batt, sci, worst, worstAt, rough, problems, pts };
+}
+function mapRect(w, h) {
+  const left = w >= 900 ? 392 : 16, top = w >= 900 ? 70 : 150, aw = w - left - 16, ah = h - top - 168, mw = Math.max(200, Math.min(aw, ah * 1.35));
+  return { x: left + (aw - mw) / 2, y: top, w: mw, h: mw / 1.35 };
+}
+const mpt = (R, p) => ({ x: R.x + p.x * R.w, y: R.y + p.y * R.h });
+const ROCKS = [
+  { name: 'Rock from the rille rim', type: 'basalt', look: 'Dark grey and full of small holes left by gas bubbles', col: '#4a4b50' },
+  { name: 'Genesis Rock (Spur crater)', type: 'anorth', look: 'Almost white, made of large pale crystals', col: '#e6e3da' },
+  { name: 'Rock from St. George crater', type: 'breccia', look: 'Sharp chunks of different rocks cemented together', col: '#8d877f' },
+  { name: 'Boulder chip near Dune crater', type: 'basalt', look: 'Dark, fine-grained lava rock with a few bubble holes', col: '#55565b' }];
+const BINS = [{ type: 'basalt', name: 'Basalt', desc: 'Volcanic lava rock: dark, often with bubble holes.' }, { type: 'anorth', name: 'Anorthosite', desc: 'Pale rock of the Moon’s oldest crust.' }, { type: 'breccia', name: 'Breccia', desc: 'Rock smashed by impacts and welded back together.' }];
+function sampleLayout(w, h) { const R = mapRect(w, h), bw = (R.w - 40) / 3; return { R, rocks: ROCKS.map((_, i) => ({ x: R.x + R.w * (i + 1) / (ROCKS.length + 1), y: R.y + R.h * .26 })), bins: BINS.map((b, i) => ({ id: 'bin' + i, x: R.x + 10 + i * (bw + 10), y: R.y + R.h * .55, w: bw, h: R.h * .42, b })) }; }
+/* ---- Opportunity storm model (approximate values based on NASA reports) ---- */
+const tauAt = v => 1 + 9.8 * Math.pow(v, 1.6);                        // sky opacity over the storm, 30 May -> 10 June 2018
+const powerAt = tau => 645 * Math.exp(-.3375 * (tau - 1));            // watt-hours per sol: ~645 at tau 1, ~22 at tau 10.8
+function stormLayout(w, h) { const R = mapRect(w, h), x = R.x + 20, ww = R.w - 40; return { R, slider: { x, y: R.y + R.h - 50, w: ww, h: 14 }, snap: { id: 'snap', x: R.x + R.w - 220, y: R.y + 20, w: 200, h: 54 } }; }
+function swLayout(st, w, h) {
+  const pw = Math.min(st.cx ? 400 : 500, w - 40), x = (st.cx || .5) * w - pw / 2, y = h * (st.y || .3);
+  return { x, y, w: pw, rows: st.items.map((it, i) => ({ id: 'sw' + i, it, x, y: y + 54 + i * 44, w: pw, h: 38 })) };
+}
+function tracLayout(w, h) {
+  const pw = Math.min(620, w - 40), x = w / 2 - pw / 2, y = h - 300, bw = (pw - 40) / 3;
+  return { x, y, w: pw, h: 190, modes: [['forward', 'Forward'], ['backward', 'Backward'], ['wiggle', 'Steer side to side']].map(([id, lab], i) => ({ id, lab, x: x + 10 + i * (bw + 10), y: y + 34, w: bw, h: 46 })),
+    slider: { x: x + 20, y: y + 112, w: pw - 230, h: 14 }, go: { id: 'go', lab: 'Try drive', x: x + pw - 190, y: y + 96, w: 170, h: 52 } };
+}
+function energyLayout(w, h) { const R = mapRect(w, h), cw = Math.min(330, R.w * .46); return { R, list: { x: R.x, y: R.y, w: cw }, graph: { x: R.x + cw + 20, y: R.y + 10, w: R.w - cw - 20, h: R.h * .62 }, run: { id: 'run', x: R.x + cw + 20, y: R.y + R.h * .62 + 30, w: 190, h: 52 } }; }
+const ENERGY = { cap: 1000, start: 70, sols: 12, list: [['Mission clock', 10, 'The clock is what wakes the rover to check its batteries'], ['Survival heaters', 220], ['Daily radio', 150], ['Science instruments', 120], ['Panoramic camera', 90], ['Robotic arm', 60]] };
+function commLayout(w, h) { const R = mapRect(w, h); return { R, slider: { x: R.x + 20, y: R.y + R.h - 40, w: R.w - 40, h: 14 }, tx: { id: 'tx', x: R.x + 20, y: R.y + R.h - 120, w: 200, h: 52 }, hypo: { id: 'hypo', x: R.x + 240, y: R.y + R.h - 120, w: 250, h: 52 }, fin: { id: 'fin', x: R.x + R.w - 200, y: R.y + R.h - 120, w: 180, h: 52 } }; }
+
+const STEP = {
+  unbolt: { short: 'Remove the bolts', update: (b, st, ptrs, dt, now) => boltWork(b, ptrs, -1, now) },
+  bolt: { short: 'Tighten', begin(b) { b.bolts = b.R.bolts.map(s => makeBolt(b, s, true)); }, update: (b, st, ptrs, dt, now) => boltWork(b, ptrs, 1, now) },
+  remove: { short: 'Take out the broken part',
+    update(b, st, ptrs, dt, now, w, h) {
+      const u = b.unit, bin = proj(b.bin);
+      for (const q of ptrs) {
+        const S = q.S;
+        if (S.drag === u) {
+          if (!q.pinch) { S.drag = null; u.held = null; homeTween(b, u.g, b.holder); if (!q.lost) toast('Drop it right into the scrap bin'); continue; }
+          u.g.position.copy(planePoint(q.px, q.py, S.dz, w, h)).add(S.doff);
+          if (Math.hypot(q.px - bin.x, q.py - bin.y) < 85) { S.drag = null; scrapTween(b, u.g, true); b.unit = null; beep(260, .15, 'sawtooth', .05); return true; }
+        } else if (fresh(q, now) && !u.held && pickAt(q.px, q.py, w, h, meshesOf(u), 30, bcam)) {
+          b.root.attach(u.g); u.g.userData.tw = 0; u.held = S; S.drag = u; S.dz = u.g.position.z; S.doff = u.g.position.clone().sub(planePoint(q.px, q.py, S.dz, w, h)); beep(520, .06);
+        }
+      }
+      return false;
+    } },
+  fit: { short: 'Fit the replacement',
+    begin(b) {
+      const seen = new Set([b.def.kind]), decoys = shuf(b.C.parts.filter(d => d.spare)).filter(d => !seen.has(d.kind) && seen.add(d.kind)).slice(0, 2);
+      b.rack = shuf([b.def, ...decoys]).map(def => {
+        const sp = makePart(def, 'normal'), box = new THREE.Box3().setFromObject(sp.g), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+        sp.mats.forEach(m => m.emissive && m.emissive.setHex(0x05261a));
+        return { sp, def, correct: def.kind === b.def.kind, rs: 1.0 / Math.max(size.x, size.y, size.z), cy: c.y, slot: new THREE.Vector3(), held: null };
+      });
+      layoutBench(b); b.rack.forEach(it => { it.sp.g.scale.setScalar(it.rs); it.sp.g.position.copy(it.slot); b.root.add(it.sp.g); }); b.ghost.g.visible = true;
+    },
+    update(b, st, ptrs, dt, now, w, h) {
+      const sock = proj(b.holder.getWorldPosition(tmpV));
+      for (const it of b.rack) if (!it.held) { const g = it.sp.g; tmpV.copy(it.slot); tmpV.y -= it.cy * g.scale.x; g.position.lerp(tmpV, .18); g.scale.setScalar(g.scale.x + (it.rs - g.scale.x) * .18); g.rotation.y += dt * .7; g.rotation.x *= .9; g.rotation.z *= .9; }
+      for (const q of ptrs) {
+        const S = q.S, it = b.rack.find(r => r === S.drag);
+        if (it) {
+          const g = it.sp.g;
+          if (!q.pinch) { S.drag = null; it.held = null; const p = proj(g.position); if (!q.lost && !it.correct && Math.hypot(p.x - sock.x, p.y - sock.y) < 160) err('Wrong part: a ' + lname(it.def).toLowerCase() + ' does not fit this socket'); continue; }
+          S.doff.multiplyScalar(.9); g.position.copy(planePoint(q.px, q.py, S.dz, w, h)).add(S.doff); g.scale.setScalar(g.scale.x + (b.S - g.scale.x) * .12); g.quaternion.slerp(b.holder.quaternion, .12);
+          const p = proj(g.position);
+          if (it.correct && Math.hypot(p.x - sock.x, p.y - sock.y) < 85) {
+            S.drag = null; homeTween(b, g, b.holder); it.sp.mats.forEach(m => m.emissive && m.emissive.setHex(0)); b.unit = it.sp; b.unit.broken = false; b.ghost.g.visible = false;
+            b.rack.filter(r => r !== it).forEach(r => scrapTween(b, r.sp.g, false)); b.rack = []; beep(440, .1); beep(660, .12, 'sine', .07, .08); toast('Seated: ' + lname(b.def)); return true;
+          }
+        } else if (fresh(q, now)) {
+          for (const r of b.rack) if (!r.held && pickAt(q.px, q.py, w, h, meshesOf(r.sp), 26, bcam)) { r.held = S; S.drag = r; S.dz = r.sp.g.position.z; S.doff = r.sp.g.position.clone().sub(planePoint(q.px, q.py, S.dz, w, h)); beep(520, .06); break; }
+        }
+      }
+      return false;
+    } },
+  wipe: { short: 'Clean it',
+    begin(b, st) { st.p = 0; st.ct = 0; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const meshes = b.dust.map(o => o.m);
+      for (const o of b.dust) { const hw = o.m.geometry.parameters.width / 2, l = proj(o.m.localToWorld(tmpV.set(-hw, 0, 0))), r = proj(o.m.localToWorld(tmpV.set(hw, 0, 0))); o.k = o.cv.width / Math.max(40, Math.hypot(r.x - l.x, r.y - l.y)); }
+      for (const q of ptrs) {
+        const S = q.S; if (!q.wipe.length) { S.wl = []; continue; }
+        q.wipe.forEach((pt, j) => {
+          setRay(pt.x, pt.y, w, h, bcam); const hit = ray.intersectObjects(meshes, false)[0], last = S.wl[j];
+          if (!hit) { S.wl[j] = null; return; }
+          const o = b.dust.find(d => d.m === hit.object), cx = hit.uv.x * o.cv.width, cy = (1 - hit.uv.y) * o.cv.height;
+          if (last && last.o === o && now - last.t < 150) { const sp = Math.hypot(pt.x - last.sx, pt.y - last.sy) / Math.max(now - last.t, 8) * 1000, s = clamp((sp - 40) / 600, 0, .35); if (s > 0) wipeStroke(o, last, { x: cx, y: cy }, (q.id === 'm' ? 20 : 16) * o.k, s); }
+          S.wl[j] = { o, x: cx, y: cy, sx: pt.x, sy: pt.y, t: now };
+        });
+      }
+      if (now - st.ct > 250) { st.ct = now; st.p = b.dust.reduce((a, o) => a + clamp(1 - opaque(o) / o.init, 0, 1), 0) / b.dust.length; }
+      if (st.p >= st.goal) { b.dust.forEach(o => b.tw.push(() => { o.m.material.opacity -= .06; if (o.m.material.opacity <= 0) { o.m.visible = false; return true; } return false; })); toast(st.done || 'Clean'); return true; }
+      return false;
+    } },
+  tune: { short: 'Aim it',
+    update(b, st, ptrs, dt) {
+      const o = b.tn, kp = proj(b.knob.getWorldPosition(tmpV)), tg = [{ key: b.knob, x: kp.x, y: kp.y }];
+      turnTargets(tg, ptrs, 95, (t, d) => { b.k += d; }); b.knobAct = tg.act;
+      b.err = b.e0 + b.k * .5;
+      if (o.limit && Math.sign(b.e0) * b.err < o.limit) { b.err = Math.sign(b.e0) * o.limit; b.k = (b.err - b.e0) / .5; }
+      b.knobSpin.rotation.z = -b.k; b.piv.rotation.z = o.base - b.err;
+      const tick = Math.round(b.k * 6); if (tick !== b.tick) { b.tick = tick; beep(1500, .015, 'square', .02); }
+      if (o.limit) { st.hold = Math.abs(Math.abs(b.err) - o.limit) < .01 ? (st.hold || 0) + dt : 0; if (st.hold > .5) { toast(o.done); return true; } return false; }
+      if (Math.abs(b.err) < .05) { b.e0 -= b.err; b.err = 0; b.piv.rotation.z = o.base; toast(o.done || 'Locked on'); return true; }
+      return false;
+    } },
+  tension: { short: 'Pull the string taut',
+    begin(b, st) { st.p = 0; st.hooked = false; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const hk = proj(b.holder.localToWorld(tmpV.copy(st.at))); st.hk = hk; let ten = 0, hooked = false;
+      if (H[0] && H[1]) {   // cat's cradle: the index-finger string between the two hands
+        const A = H[0][8], C = H[1][8], dx = C.x - A.x, dy = C.y - A.y, L2 = dx * dx + dy * dy || 1, u = ((hk.x - A.x) * dx + (hk.y - A.y) * dy) / L2, off = Math.hypot(hk.x - A.x - dx * u, hk.y - A.y - dy * u);
+        hooked = st.hooked ? u > -.1 && u < 1.1 && off < 140 : u > .1 && u < .9 && off < 50;
+        ten = clamp(Math.sqrt(L2) / (Math.min(w, h * 1.6) * .55), 0, 1); if (hooked && !st.hooked) beep(880, .06); st.mouse = false;
+      } else if (MS.down && (st.mouse || (TS[2].riseT > now - 450 && Math.hypot(MS.x - hk.x, MS.y - hk.y) < 70))) { st.mouse = true; hooked = true; ten = clamp(Math.hypot(MS.x - hk.x, MS.y - hk.y) / (h * .42), 0, 1); }
+      else st.mouse = false;
+      st.hooked = hooked; st.ten = ten; b.hook = hooked && !st.mouse ? hk : null; b.hookTension = ten;
+      if (hooked && ten >= .65) { st.p += dt; if ((st.p * 4 | 0) !== ((st.p - dt) * 4 | 0)) beep(220 + st.p * 80, .08, 'sawtooth', .03); } else st.p = Math.max(0, st.p - dt * .4);
+      const k = clamp(st.p / st.need, 0, 1);
+      if (st.tow) { b.unit.g.position.set(k * .55, -.16 + k * .14, 0); b.unit.g.rotation.z = Math.sin(now / 60) * .012 * (hooked && ten >= .65 ? 1 : 0); }
+      if (st.p >= st.need) { b.unit.g.rotation.z = 0; b.hook = null; toast('In this simulation the tow line pulls Spirit free'); return true; }
+      return false;
+    } },
+  switches: { short: 'Set the switches',
+    begin(b, st) { st.items = st.list.map(([lab, w, keep, cycle]) => ({ lab, w, keep, cycle, on: true, was: false })); },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = swLayout(st, w, h), id = uiHit(ptrs, L.rows, now, dt);
+      if (id) {
+        const it = st.items[+id.slice(2)];
+        if (st.mode === 'cycle') {
+          it.on = !it.on; beep(it.on ? 700 : 400, .07, 'square', .05);
+          if (!it.on) toast(it.cycle ? it.lab + ' OFF. Now switch it back on' : it.lab + ' off. ' + it.keep);
+          else if (it.cycle && it.was) toast(it.lab + ' back ON: the circuit has been cycled');
+          if (!it.on && it.cycle) it.was = true;
+        } else { if (it.on && it.keep) err('Keep it on: ' + it.keep); else { it.on = !it.on; beep(it.on ? 700 : 400, .07, 'square', .05); } }
+      }
+      if (st.mode === 'cycle') return st.items.every(it => it.on && (!it.cycle || it.was));
+      return st.items.every(it => it.keep || !it.on);
+    } },
+  handle: { short: 'Test the steering',
+    begin(b, st) { st.n = 0; st.side = 0; st.a = 0; },
+    update(b, st, ptrs, dt, now) {
+      const tp = hproj(b, .22, .53, 0); st.tp = tp; const held = grabHandle(st, ptrs, tp, now); let ang = 0;
+      if (held) { ang = clamp((held.px - st.bx) / 150, -1, 1); if (ang > .65 && st.side !== 1) { st.side = 1; st.n++; beep(500 + st.n * 60, .05); } else if (ang < -.65 && st.side !== -1) { st.side = -1; st.n++; beep(500 + st.n * 60, .05); } }
+      st.a += (ang - st.a) * .25; const s = st.a * .42;
+      b.wp.wRL.rotation.y = b.wp.wRR.rotation.y = s; b.wp.wFL.rotation.y = b.wp.wFR.rotation.y = st.front ? -s : 0; b.hcp.rotation.x = st.a * .35;
+      if (st.n >= (st.need || 4)) { ptrs.forEach(q => { if (q.S.drag === st) q.S.drag = null; }); toast(st.msg || (st.front ? 'All four wheels steer: front steering is back' : 'Only the rear wheels turned. Front steering is not responding')); return true; }
+      return false;
+    } },
+  route: { short: 'Plan the drive',
+    begin(b, st) { st.ids = []; st.ev = evalRoute([]); st.drive = null; st.tried = 0; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const R = mapRect(w, h);
+      if (st.drive) { st.drive.k = (now - st.drive.t0) / 7000; if (st.drive.k >= 1) { toast('Back at Falcon with ' + Math.round(st.ev.batt) + '% battery and samples aboard'); return true; } return false; }
+      const items = A15.stations.map(s => { const p = mpt(R, s); return { id: s.id, x: p.x - 24, y: p.y - 24, w: 48, h: 48 }; });
+      const btnY = R.y + R.h + 36; items.push({ id: 'clear', x: R.x, y: btnY, w: 150, h: 52 }, { id: 'drive', x: R.x + R.w - 170, y: btnY, w: 170, h: 52 });
+      st.btnY = btnY;
+      const id = uiHit(ptrs, items, now, dt);
+      if (id === 'clear') { st.ids = []; beep(400, .05); }
+      else if (id === 'drive') {
+        st.tried++;
+        if (st.ev.problems.length) { toast('Not safe yet: ' + st.ev.problems[0]); beep(200, .15, 'square'); }
+        else { st.drive = { t0: now, k: 0 }; arp([440, 554, 659]); toast('Driving… stopping to sample at each station'); }
+      } else if (id) { const i = st.ids.indexOf(id); if (i >= 0) st.ids.splice(i, 1); else st.ids.push(id); beep(i >= 0 ? 500 : 760, .05); }
+      st.ev = evalRoute(st.ids);
+      return false;
+    } },
+  samples: { short: 'Classify the samples',
+    begin(b, st) { st.rocks = ROCKS.map(r => Object.assign({}, r, { done: false, held: null, x: 0, y: 0 })); },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = sampleLayout(w, h);
+      st.rocks.forEach((r, i) => { if (!r.held && !r.done) { r.x += (L.rocks[i].x - r.x) * .25; r.y += (L.rocks[i].y - r.y) * .25; } });
+      st.look = null;
+      for (const q of ptrs) {
+        const S = q.S, r = st.rocks.find(x => x === S.drag);
+        if (r) {
+          if (!q.pinch) {
+            S.drag = null; r.held = null; if (q.lost) continue;
+            const bin = L.bins.find(bn => inRect(r.x, r.y, bn));
+            if (bin) { if (bin.b.type === r.type) { r.done = true; r.bin = L.bins.indexOf(bin); beep(760, .06); beep(1020, .08, 'sine', .06, .06); toast('Correct: ' + r.name + ' is ' + bin.b.name.toLowerCase()); }
+              else err('Not ' + bin.b.name.toLowerCase() + ': this rock is ' + r.look.toLowerCase() + '. ' + BINS.find(x => x.type === r.type).desc); }
+            continue;
+          }
+          r.x = q.px; r.y = q.py;
+        } else {
+          const near = st.rocks.find(x => !x.done && !x.held && Math.hypot((q.pinch ? q.px : q.x) - x.x, (q.pinch ? q.py : q.y) - x.y) < 46);
+          if (near && (q.point || q.id === 'm')) st.look = near;
+          if (near && fresh(q, now)) { near.held = S; S.drag = near; beep(520, .05); }
+        }
+      }
+      return st.rocks.every(r => r.done);
+    } },
+  dusttest: { short: 'Drive and watch the dust',
+    begin(b, st) { st.rot = 0; st.up = 0; st.total = 0; b.p2 = []; b.fenderOn = st.when === 'after'; },
+    update(b, st, ptrs, dt, now) {
+      const c = hproj(b, 0, 0, 0); st.c = c; let spin = 0; const tg = [{ key: 'wheel', x: c.x, y: c.y }];
+      turnTargets(tg, ptrs, 140, (t, d) => { spin += d; }); st.act = tg.act;
+      st.rot += Math.abs(spin); b.spinPiv.rotation.z -= spin;
+      const sc = b.S * 70, fwd = spin >= 0 ? 1 : -1, n = Math.min(10, Math.abs(spin) * 45 | 0);
+      if (n) { const o = hproj(b, -.3 * fwd, -.28, 0), gcol = '190,190,190';
+        if (b.fenderOn) emitDust(b, o.x, o.y, n, -fwd * sc * .9, -fwd * sc * 1.8, -sc * .5, -sc * .1, gcol);
+        else emitDust(b, o.x, o.y, n, -fwd * sc * 1.2, -fwd * sc * 2.6, -sc * 3.2, -sc * 1.9, gcol); }
+      st.seatY = hproj(b, 1, .62, 0).y; st.floor = hproj(b, 0, -.42, 0).y;
+      const dead = stepDust(b, dt, sc * 1.6, st.floor, st.seatY); for (const p of dead) { st.total++; if (p.high) st.up++; }
+      const n2 = st.total + b.p2.length; st.pct = n2 ? (st.up + b.p2.filter(p => p.high).length) / n2 : 0;
+      if (st.rot >= st.need && st.total > 40) { rover.dust[st.when] = st.pct; toast(st.when === 'before' ? Math.round(st.pct * 100) + '% of the dust flew above seat height' : 'With the new fender only ' + Math.round(st.pct * 100) + '% of the dust rose above seat height'); return true; }
+      return false;
+    } },
+  assemble: { short: 'Assemble',
+    begin(b, st) { (st.set === 'maps' ? setupMaps : setupFender)(b, st); },
+    update(b, st, ptrs, dt, now, w, h) {
+      for (const q of ptrs) {
+        const S = q.S, it = st.items.find(x => x === S.drag);
+        if (it) {
+          if (!q.pinch) {
+            S.drag = null; it.held = null; if (q.lost) { sendHome(b, it); continue; }
+            const tg = st.targets.filter(t => !t.filled).map(t => ({ t, d: Math.hypot(...(() => { const p = proj(t.parent.localToWorld(tmpV.copy(t.p))); return [p.x - q.px, p.y - q.py]; })()) })).sort((a, c) => a.d - c.d)[0];
+            if (tg && tg.d < 90) { if (tg.t.ok) placeItem(b, st, it, tg.t); else { err(tg.t.msg); st.miss = (st.miss || 0) + 1; sendHome(b, it); } }
+            else { toast(st.missMsg); st.miss = (st.miss || 0) + 1; sendHome(b, it); }
+            continue;
+          }
+          S.doff.multiplyScalar(.9); it.g.position.copy(planePoint(q.px, q.py, S.dz, w, h)).add(S.doff);
+        } else if (fresh(q, now)) {
+          const hit = st.items.find(x => !x.placed && !x.held && pickAt(q.px, q.py, w, h, meshesIn(x.g), 26, bcam));
+          if (hit) { b.root.attach(hit.g); hit.g.userData.tw = 0; hit.held = S; S.drag = hit; S.dz = hit.g.position.z; S.doff = hit.g.position.clone().sub(planePoint(q.px, q.py, S.dz, w, h)); beep(520, .06); }
+        }
+      }
+      return st.items.every(x => x.placed) && !b.tw.length;
+    } },
+  tape: { short: 'Tape the seams',
+    // fail: the crew's first attempt, taping across the broken edge of the dusty fender (it does not hold)
+    begin(b, st) { st.seams = (st.fail ? [[V(-.24, .43, .15), V(-.43, .24, .15)]] : [[V(0, -.13, .012), V(0, .13, .012)], [V(-.33, 0, .012), V(.33, 0, .012)]]).map(([a, c]) => ({ a, c, done: false, hold: 0 })); },
+    update(b, st, ptrs, dt, now) {
+      const seam = st.seams.find(s => !s.done); if (!seam) return true; const P = st.fail ? b.holder : b.asm;
+      const A = proj(P.localToWorld(tmpV.copy(seam.a))), Cc = proj(P.localToWorld(tmpV.copy(seam.c))), sm = { x: (A.x + Cc.x) / 2, y: (A.y + Cc.y) / 2 }, slen = dd(A, Cc), sang = Math.atan2(Cc.y - A.y, Cc.x - A.x);
+      st.A = A; st.C = Cc; st.msg = ''; let ok = false; b.tapeOn = null;
+      if (H[0] && H[1]) {   // the index-finger cat's-cradle string becomes a strip of tape
+        const L = H[0][8], R = H[1][8], mid = { x: (L.x + R.x) / 2, y: (L.y + R.y) / 2 }, len = dd(L, R), ang = Math.atan2(R.y - L.y, R.x - L.x);
+        let da = Math.abs(ang - sang) % PIE; da = Math.min(da, PIE - da);
+        const near = dd(mid, sm) < 55, aligned = da < .3, long = len >= slen * .9, short = len <= slen * 2.4;
+        st.msg = !near ? 'Move the tape over the glowing seam' : !aligned ? 'Turn your hands so the tape lines up with the seam' : !long ? 'Stretch it longer: the tape must cover the whole seam' : !short ? 'Bring your hands a little closer' : 'Hold still… pressing the tape down';
+        ok = near && aligned && long && short; b.tapeOn = ok ? 'good' : 'on';
+      } else if (MS.down || st.md) {
+        if (!st.md && TS[2].riseT > now - 400) { if (dd(MS, A) < 45) st.md = { from: A, to: Cc }; else if (dd(MS, Cc) < 45) st.md = { from: Cc, to: A }; }
+        if (st.md && !MS.down) { if (dd(MS, st.md.to) < 45) ok = 'mouse'; else toast('Drag the tape all the way along the seam'); st.md = null; }
+      }
+      if (ok === 'mouse') seam.hold = 1; else if (ok) seam.hold += dt; else seam.hold = Math.max(0, seam.hold - dt * 2);
+      if (seam.hold >= .6) {
+        seam.done = true; const d = seam.c.clone().sub(seam.a), m = new THREE.Mesh(new BoxG(d.length() + .04, .05, .004), new THREE.MeshStandardMaterial({ color: 0x8c8f94, roughness: .7 }));
+        m.position.copy(seam.a).add(seam.c).multiplyScalar(.5); m.rotation.z = Math.atan2(d.y, d.x); P.add(m); beep(600, .08); beep(800, .1, 'sine', .06, .08);
+        if (st.fail) {   // dust stops the tape sticking: it peels off and drops away
+          m.material.transparent = true; let t = 0;
+          b.tw.push(() => { t += .016; if (t > .9) { m.position.y -= .012; m.rotation.z += .06; m.material.opacity = Math.max(0, 1 - (t - .9) * 1.2); } if (t > 1.8) { P.remove(m); return true; } return false; });
+          toast('The tape will not stick to the dusty fender. In 1972 the piece fell off again during the drive.'); beep(200, .25, 'square', .05, .9);
+        } else toast('Seam taped');
+      }
+      return st.seams.every(s => s.done);
+    } },
+  motortest: { short: 'Command the motor',
+    begin(b, st) { st.cmd = 0; st.cur = 0; },
+    update(b, st, ptrs, dt, now) {
+      const c = hproj(b, 0, 0, 0); st.c = c; let d = 0; const tg = [{ key: 'mt', x: c.x, y: c.y }];
+      turnTargets(tg, ptrs, 150, (t, dd2) => { d += dd2; }); st.act = tg.act;
+      st.cmd += Math.abs(d); st.cur += (Math.min(1, Math.abs(d) * 25) - st.cur) * .2; b.spinPiv.rotation.z = Math.sin(now / 30) * .012 * st.cur;
+      if (st.cur > .3 && (now / 400 | 0) !== st.tk2) { st.tk2 = now / 400 | 0; beep(90, .1, 'sawtooth', .03); }
+      if (st.cmd >= 7) { toast('The motor gets power but the wheel does not turn: the drive motor has failed'); return true; }
+      return false;
+    } },
+  traction: { short: 'Try escape moves',
+    begin(b, st) { st.mode = 'backward'; st.speed = .6; st.tries = []; st.sink = 0; st.prog = 0; st.anim = 0; st.slow = false; st.stall = false; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = tracLayout(w, h);
+      if (st.anim > 0) {
+        st.anim -= dt; b.unit.g.rotation.z = Math.sin(now / 40) * .01;
+        for (const x of [-.75, 0, .75]) { const o = hproj(b, x, -.6, .7), sc = b.S * 60; emitDust(b, o.x, o.y, st.cur.slip > .97 ? 3 : 1, -sc * 1.2, sc * 1.2, -sc * 2.2, -sc * .8, '199,154,99'); }
+        if (st.anim <= 0) {
+          b.unit.g.rotation.z = 0; st.sink += st.cur.sink; st.prog += st.cur.prog; st.tries.push(st.cur); if (st.cur.speed < .35) st.slow = true;
+          toast(st.cur.msg);
+          if (st.tries.length === 3 && !st.stall) { st.stall = true; setTimeout(() => toast('November 2009: Spirit’s right-rear wheel stalls too. Only four wheels can drive now.'), 2600); }
+        }
+      } else {
+        st.speed = uiSlider(ptrs, L.slider, st.speed, now, 'spd');
+        const id = uiHit(ptrs, [...L.modes, L.go], now, dt);
+        if (id === 'go') {
+          const sp = st.speed, slip = clamp(.8 + .19 * sp + .01 * st.sink - (st.mode === 'backward' ? .04 : 0) - (st.mode === 'wiggle' ? .02 : 0), .78, .995);
+          const prog = (1 - slip) * (st.mode === 'wiggle' ? 6 : 14) * (.5 + sp), sink = sp * sp * 4 + (slip > .97 ? 1.5 : .2) - (st.mode === 'wiggle' ? .4 : 0);
+          st.cur = { mode: st.mode, speed: sp, slip, prog, sink: Math.max(0, sink), msg: sp > .7 ? 'Fast spinning: ' + Math.round(slip * 100) + '% slip. The wheels dug ' + sink.toFixed(1) + ' cm deeper for ' + prog.toFixed(1) + ' cm of progress.' : sp < .35 ? 'Slow and careful: ' + Math.round(slip * 100) + '% slip, ' + prog.toFixed(1) + ' cm of progress, little extra sinking.' : 'Medium speed: ' + Math.round(slip * 100) + '% slip, ' + prog.toFixed(1) + ' cm forward, ' + sink.toFixed(1) + ' cm deeper.' };
+          st.anim = 1.6; beep(140, 1.4, 'sawtooth', .03);
+        } else if (id) st.mode = id;
+      }
+      b.unit.g.position.y = -.16 - st.sink * .006; b.unit.g.position.x = st.prog * .004;
+      return st.tries.length >= 3 && st.slow && st.anim <= 0;
+    } },
+  storm: { short: 'Track the storm',
+    begin(b, st) { st.v = 0; st.reads = []; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = stormLayout(w, h); st.v = uiSlider(ptrs, L.slider, st.v, now, 'sol');
+      if (uiHit(ptrs, [L.snap], now, dt) === 'snap') {
+        const tau = tauAt(st.v);
+        if (!st.reads.length || st.v - st.reads[st.reads.length - 1].v > .15) { st.reads.push({ v: st.v, tau }); beep(1000, .05); toast('Pancam photo of the Sun: tau ' + tau.toFixed(1)); }
+        else toast('Move further through the storm before the next photo');
+      }
+      if (Math.abs(G.storm - st.v) > .02) { G.storm = st.v; glEl.style.background = bayBackground(); }
+      return st.v > .97 && st.reads.length >= 3;
+    } },
+  energy: { short: 'Manage the energy',
+    begin(b, st) { st.items = ENERGY.list.map(([lab, wh, keep]) => ({ lab, w: wh, keep, on: true })); st.sol = 0; st.batt = ENERGY.start; st.run = false; st.log = []; st.cold = 0; st.clk = 0; st.over = false; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = energyLayout(w, h), rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 30 + i * 44, w: L.list.w, h: 38 }));
+      const id = uiHit(ptrs, st.over ? [] : [...rows, ...(st.run ? [] : [L.run])], now, dt);
+      if (id === 'run') { st.run = true; beep(660, .08); }
+      else if (id) { const it = st.items[+id.slice(2)]; if (it.on && it.keep) err('Keep it on: ' + it.keep); else { it.on = !it.on; beep(it.on ? 700 : 400, .07, 'square', .05); } }
+      if (st.run && !st.over) {
+        st.clk += dt;
+        if (st.clk > 1.2) {
+          st.clk = 0; const tau = 2 + 8.8 * st.sol / (ENERGY.sols - 1), solar = powerAt(tau), load = st.items.reduce((a, it) => a + (it.on ? it.w : 0), 0), heat = st.items[1].on;
+          st.batt = clamp(st.batt + (solar - load) / ENERGY.cap * 100, 0, 100); const temp = -46 + (heat ? 18 : 0) + 9 * Math.min(1, tau / 8);
+          if (temp < -40) st.cold++; st.log.push({ tau, solar, load, batt: st.batt, temp }); st.sol++; beep(st.batt > 20 ? 500 : 250, .05);
+          if (st.batt <= 0 || st.sol >= ENERGY.sols) { st.over = true; st.fault = st.batt <= 0; st.endT = now;
+            toast(st.fault ? 'Low-power fault: the rover shut itself down. This is what really happened on 10 June 2018.' : 'You reached the storm’s peak with ' + Math.round(st.batt) + '% battery and ' + st.cold + ' cold warnings (simplified model).'); }
+        }
+      }
+      return st.over && now - st.endT > 3500;
+    } },
+  comm: { short: 'Try to make contact',
+    begin(b, st) { st.v = 0; st.tries = 0; st.phase = 'idle'; st.clk = 0; st.hypo = false; st.reply = false; st.finish = false; G.storm = 1; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const L = commLayout(w, h); if (st.phase === 'idle') st.v = uiSlider(ptrs, L.slider, st.v, now, 'month');
+      const clear = st.v > .55, s2 = 1 - st.v * .85; if (Math.abs(G.storm - s2) > .02) { G.storm = s2; glEl.style.background = bayBackground(); }
+      const id = uiHit(ptrs, [Object.assign({}, L.tx, { disabled: !clear || st.phase !== 'idle' }), Object.assign({}, L.hypo, { disabled: st.tries < 3 || st.phase !== 'idle' }), Object.assign({}, L.fin, { disabled: st.tries < 3 || st.phase !== 'idle' })], now, dt);
+      if (id === 'tx' || id === 'hypo') { st.phase = 'out'; st.clk = 0; st.hypo = id === 'hypo'; st.reply = false; beep(880, .12); beep(1320, .12, 'sine', .06, .12); }
+      if (id === 'fin') { st.finish = true; }
+      if (st.phase === 'out') { st.clk += dt; if (st.clk > 2.2) { st.phase = 'wait'; st.clk = 0; } }
+      else if (st.phase === 'wait') { st.clk += dt; if (st.clk > 2.6) { st.phase = 'idle'; if (st.hypo) { st.reply = true; arp([523, 784, 1047]); toast('HYPOTHETICAL: a reply! In this imagined case a wind gust cleaned the panels.'); } else { st.tries++; beep(200, .3, 'sine', .05); toast('No reply. Attempt ' + st.tries + '. (NASA sent more than 1,000 commands.)'); } } }
+      return st.finish;
+    } },
+};
+function setupMaps(b, st) {
+  b.asm = new THREE.Group(); b.asm.position.set(-1.3, .3, .1); b.holder.add(b.asm);
+  st.targets = [[-.165, .125], [.165, .125], [-.165, -.125], [.165, -.125]].map(([x, y]) => ({ parent: b.asm, p: V(x, y, 0), rz: 0, s: 1, ok: true, w: .32, h: .24 }));
+  st.missMsg = 'Place each map on the dashed outline on the workbench';
+  st.items = [0, 1, 2, 3].map(i => {
+    const cv = document.createElement('canvas'); cv.width = 160; cv.height = 120; const c = cv.getContext('2d');
+    c.fillStyle = '#ddd6bb'; c.fillRect(0, 0, 160, 120); c.strokeStyle = 'rgba(110,85,50,.55)'; c.lineWidth = 1;
+    for (let k = 0; k < 7; k++) { c.beginPath(); for (let x = 0; x <= 160; x += 10) c.lineTo(x, 20 + k * 15 + Math.sin(x / 20 + k + i) * 6); c.stroke(); }
+    c.strokeStyle = 'rgba(40,80,140,.5)'; for (let x = 0; x < 160; x += 40) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 120); c.stroke(); }
+    c.fillStyle = '#4a3a20'; c.font = 'bold 11px sans-serif'; c.fillText('TAURUS-LITTROW  ' + (i + 1), 6, 14);
+    const g = new THREE.Group(), m = new THREE.Mesh(new BoxG(.32, .24, .008), new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(cv), roughness: .8 })); g.add(m);
+    g.scale.setScalar(b.S); g.position.set(-b.hw * .82 + i * b.S * .4, -b.hh * .66, .4); b.root.add(g);
+    return { g, held: null, placed: false, home: { parent: b.root, p: g.position.clone(), rz: 0, s: b.S } };
+  });
+}
+function setupFender(b, st) {
+  st.targets = [{ parent: b.holder, p: V(-.36, .36, .06), rz: .785, s: .6, ok: true, w: .64, h: .48 },
+    { parent: b.holder, p: V(.36, .36, .06), rz: -.785, s: .6, ok: false, w: .64, h: .48, msg: 'That is the front of the wheel. The broken extension was at the back, behind the wheel.' }];
+  st.missMsg = 'Carry the sheet to the broken end of the fender';
+  st.items = [{ g: b.asm, held: null, placed: false, home: { parent: b.holder, p: b.asm.position.clone(), rz: 0, s: 1 } }];
+}
+function placeItem(b, st, it, t) { t.filled = true; it.placed = true; tweenTo(b, it.g, t.parent, t.p.clone(), t.rz, t.s); beep(760, .06); beep(1020, .08, 'sine', .06, .06); toast(st.set === 'maps' ? 'Map in place' : 'Sheet lined up with the fender: now clamp it'); }
+function sendHome(b, it) { tweenTo(b, it.g, it.home.parent, it.home.p.clone(), it.home.rz, it.home.s); }
+
+function updateBench(dt, now, w, h, hv) {
+  bscene.updateMatrixWorld(true);
+  const ptrs = benchPointers(hv, now, dt);
+  B.tw = B.tw.filter(f => !f(dt));
+  const t = now / 1000;
+  if (B.unit && B.unit.broken && !B.R.noPulse) for (const m of B.unit.mats) if (m.emissive) m.emissive.setRGB(.1 + .08 * Math.sin(t * 6), 0, 0);
+  if (B.ghost.g.visible) B.ghost.mats.forEach(m => m.opacity = .3 + .25 * Math.sin(t * 5));
+  if (!B.done) {
+    const st = B.steps[B.si];
+    if (st.t !== 'dusttest' && B.p2.length) stepDust(B, dt, B.S * 90, h, null);
+    if (STEP[st.t].update(B, st, ptrs, dt, now, w, h)) { st.done = true; beep(660, .08); beep(880, .1, 'sine', .07, .08); nextStep(B, now); }
+  } else if (now - B.doneT > 1800) { exitBench(true, now); return; }
+  bscene.updateMatrixWorld(true);
+}
+
+/* ================= 2D overlay ================= */
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const FONT = (ctx, px, wt = 400) => ctx.font = wt + ' ' + px + 'px "Segoe UI", system-ui, sans-serif';
+/* cat's cradle hands: neon joints, a colour per finger, glowing fingertips */
+const FCOL = ['#ffe94d', '#00f0ff', '#ff2bd6', '#7dff6b', '#a46bff'];
+const jcol = i => i === 0 ? '#ffffff' : FCOL[Math.min(4, (i - 1) / 4 | 0)];
+function drawHand(ctx, p, g, role, now, S) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 1.2; ctx.strokeStyle = role === 0 ? 'rgba(70,217,255,.4)' : 'rgba(160,230,255,.26)'; ctx.beginPath();
+  for (const [a, b] of BONES) { ctx.moveTo(p[a].x, p[a].y); ctx.lineTo(p[b].x, p[b].y); }
+  ctx.stroke();
+  for (let i = 0; i < 21; i++) {
+    const q = p[i], c = role === 0 ? '#46d9ff' : jcol(i), tip = i > 0 && i % 4 === 0, r = tip ? 6 + Math.sin(now / 220 + i) * .8 : 3.2;
+    ctx.shadowColor = c; ctx.shadowBlur = tip ? 22 : 10; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, PIE * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(q.x, q.y, r * .38, 0, PIE * 2); ctx.fill();
+  }
+  ctx.restore();
+  if (role === 1 && g) {
+    if (g.g !== 'fist') { const k = clamp(1 - (g.pinchD - .12) / .4, 0, 1); ctx.strokeStyle = S.drag || S.tm === 'w' && S.tk ? '#5dff9e' : S.pinch ? '#ffb000' : 'rgba(255,255,255,.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(g.pp.x, g.pp.y, 8 + (1 - k) * 14, 0, PIE * 2); ctx.stroke(); if (k > .05) { ctx.fillStyle = S.pinch ? 'rgba(93,255,158,.5)' : 'rgba(255,176,0,.22)'; ctx.fill(); } }
+    if (G.mode === 'main' && S.g && !S.fired && S.g !== 'thumb') { const q = S.g === 'v' ? p[8] : p[9]; ctx.strokeStyle = S.g === 'v' ? '#ff9a3c' : '#ffffff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 22, -PIE / 2, -PIE / 2 + Math.min(1, (now - S.t) / (S.g === 'v' ? 900 : 1000)) * PIE * 2); ctx.stroke(); }
+  }
+}
+/* cat's cradle strings between the hands. In tow and tape tasks the index-finger string is the tool. */
+const TIPS = [4, 8, 12, 16, 20], LINKS = [];
+for (let i = 0; i < 5; i++) { LINKS.push([i, i]); if (i < 4) { LINKS.push([i, i + 1]); LINKS.push([i + 1, i]); } }
+const springs = LINKS.map(() => ({ x: 0, y: 0, vx: 0, vy: 0, init: false }));
+function drawCradle(ctx, Lh, Rh, now) {
+  const w = width, h = height, maxD = Math.min(w, h * 1.6) * .75, tSec = now / 1000, st = B && !B.done ? B.steps[B.si] : null, strong = st && (st.t === 'tension' || st.t === 'tape');
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  for (let k = 0; k < LINKS.length; k++) {
+    const A = Lh[TIPS[LINKS[k][0]]], Bp = Rh[TIPS[LINKS[k][1]]], dist = Math.hypot(Bp.x - A.x, Bp.y - A.y), tension = Math.min(1, dist / maxD), diag = LINKS[k][0] !== LINKS[k][1], index = LINKS[k][0] === 1 && LINKS[k][1] === 1;
+    const alpha = strong ? (index ? 1 : diag ? .15 : .3) : (diag ? .18 : .35);
+    if (index && B && B.hook) {
+      const c = B.hookTension >= .65 ? '#ffe94d' : B.hookTension > .35 ? '#ff2bd6' : '#00f0ff';
+      ctx.strokeStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 22; ctx.lineWidth = 3.2; ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.hook.x, B.hook.y); ctx.lineTo(Bp.x, Bp.y); ctx.stroke(); ctx.shadowBlur = 0; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke(); continue;
+    }
+    if (index && B && B.tapeOn) {   // a strip of grey tape, glowing green when lined up
+      ctx.globalAlpha = .85; ctx.shadowColor = B.tapeOn === 'good' ? '#5dff9e' : '#ffe94d'; ctx.shadowBlur = 20; ctx.strokeStyle = 'rgba(170,174,180,.9)'; ctx.lineWidth = 14;
+      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(Bp.x, Bp.y); ctx.stroke(); ctx.shadowBlur = 0; ctx.strokeStyle = B.tapeOn === 'good' ? '#5dff9e' : '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); continue;
+    }
+    const sp = springs[k], mx = (A.x + Bp.x) / 2, my = (A.y + Bp.y) / 2, sag = (1 - tension) * (.35 * dist + 20) + Math.sin(tSec * 2 + k) * (1 - tension) * 6;
+    if (!sp.init) { sp.x = mx; sp.y = my + sag; sp.init = true; }
+    sp.vx = (sp.vx + (mx - sp.x) * .16) * .8; sp.vy = (sp.vy + (my + sag - sp.y) * .16) * .8; sp.x += sp.vx; sp.y += sp.vy;
+    const cx = 2 * sp.x - mx, cy = 2 * sp.y - my, gr = ctx.createLinearGradient(A.x, A.y, Bp.x, Bp.y);
+    gr.addColorStop(0, '#00f0ff'); gr.addColorStop(.5, '#ff2bd6'); gr.addColorStop(1, '#ffe94d');
+    const wd = 2.4 - tension * 1.5;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.quadraticCurveTo(cx, cy, Bp.x, Bp.y);
+    ctx.strokeStyle = gr; ctx.shadowColor = tension > .7 ? '#ffe94d' : tension > .35 ? '#ff2bd6' : '#00f0ff'; ctx.shadowBlur = 16; ctx.globalAlpha = alpha; ctx.lineWidth = wd + 1.2; ctx.stroke();
+    ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = Math.max(.5, wd * .35); ctx.stroke();
+  }
+  ctx.restore();
+}
+function panel(ctx, x, y, w, h) { ctx.fillStyle = 'rgba(5,9,16,.8)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = 'rgba(70,217,255,.35)'; ctx.lineWidth = 1; ctx.strokeRect(x + .5, y + .5, w, h); }
+function turnArrow(ctx, x, y, r, dir, alpha) {
+  const as = -PIE / 2 - dir * .7, ae = -PIE / 2 + dir * .7;
+  ctx.strokeStyle = ctx.fillStyle = 'rgba(255,176,0,' + alpha + ')'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(x, y, r, as, ae, dir < 0); ctx.stroke();
+  const hx = x + Math.cos(ae) * r, hy = y + Math.sin(ae) * r, tx = -Math.sin(ae) * dir, ty = Math.cos(ae) * dir, nx = Math.cos(ae), ny = Math.sin(ae);
+  ctx.beginPath(); ctx.moveTo(hx + tx * 8, hy + ty * 8); ctx.lineTo(hx - tx * 2 + nx * 6, hy - ty * 2 + ny * 6); ctx.lineTo(hx - tx * 2 - nx * 6, hy - ty * 2 - ny * 6); ctx.closePath(); ctx.fill();
+}
+function progRing(ctx, x, y, r, p, dir, col) { if (p <= 0) return; ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, r, -PIE / 2, -PIE / 2 + dir * Math.min(1, p) * PIE * 2, dir < 0); ctx.stroke(); }
+function dashRing(ctx, x, y, r, col, dashed) { ctx.strokeStyle = col; ctx.lineWidth = 2; if (dashed) ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.arc(x, y, r, 0, PIE * 2); ctx.stroke(); ctx.setLineDash([]); }
+function bar(ctx, x, y, w, p, col, label) { ctx.fillStyle = 'rgba(5,9,16,.75)'; ctx.fillRect(x, y, w, 10); ctx.fillStyle = col; ctx.fillRect(x, y, w * clamp(p, 0, 1), 10); if (label) { FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.textAlign = 'center'; ctx.fillText(label, x + w / 2, y - 8); } }
+function drawBtn(ctx, r, label, o = {}) {
+  const hot = TS.some(S => S.swKey === r.id) || (inRect(MS.x, MS.y, r) && mouseLive(performance.now()));
+  ctx.fillStyle = o.disabled ? 'rgba(40,44,52,.6)' : o.on ? 'rgba(255,176,0,.35)' : hot ? 'rgba(70,217,255,.22)' : 'rgba(5,9,16,.85)'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = o.disabled ? 'rgba(219,234,242,.2)' : o.on ? '#ffb000' : o.primary ? '#ffb000' : 'rgba(70,217,255,.55)'; ctx.lineWidth = o.primary || o.on ? 2 : 1; ctx.strokeRect(r.x + .5, r.y + .5, r.w, r.h);
+  const hp = holdOf(r.id); if (hp > 0) { ctx.fillStyle = 'rgba(70,217,255,.4)'; ctx.fillRect(r.x, r.y + r.h - 4, r.w * Math.min(1, hp), 4); }
+  ctx.textAlign = 'center'; FONT(ctx, 14, 600); ctx.fillStyle = o.disabled ? 'rgba(219,234,242,.35)' : '#fff'; ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 5);
+}
+function drawSlider(ctx, r, v, label, key) {
+  const held = TS.some(S => S.drag === key);
+  ctx.fillStyle = 'rgba(5,9,16,.85)'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.fillStyle = 'rgba(70,217,255,.5)'; ctx.fillRect(r.x, r.y, r.w * v, r.h);
+  const kx = r.x + r.w * v; ctx.fillStyle = held ? '#5dff9e' : '#ffb000'; ctx.beginPath(); ctx.arc(kx, r.y + r.h / 2, 16, 0, PIE * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  if (label) { ctx.textAlign = 'left'; FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(label, r.x, r.y - 12); }
+}
+function drawToggleRows(ctx, rows) {
+  for (const r of rows) {
+    const it = r.it, hot = TS.some(S => S.swKey === r.id);
+    ctx.fillStyle = hot ? 'rgba(70,217,255,.14)' : 'rgba(255,255,255,.04)'; ctx.fillRect(r.x + 8, r.y, r.w - 16, r.h);
+    ctx.textAlign = 'left'; FONT(ctx, 13, 600); ctx.fillStyle = it.on ? '#dbeaf2' : 'rgba(219,234,242,.45)'; ctx.fillText(it.lab + (it.cycle && it.was && it.on ? '  ✓ cycled' : ''), r.x + 18, r.y + 24);
+    if (it.w) { FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.textAlign = 'right'; ctx.fillText(it.w + (r.unit || ' Wh/sol'), r.x + r.w - 86, r.y + 24); ctx.textAlign = 'left'; }
+    const tx = r.x + r.w - 76, ty = r.y + 9; ctx.fillStyle = it.on ? '#5dff9e' : '#4a4f57'; ctx.fillRect(tx, ty, 52, 20); ctx.fillStyle = '#fff'; ctx.fillRect(it.on ? tx + 30 : tx + 2, ty + 2, 20, 16);
+    FONT(ctx, 10, 700); ctx.fillStyle = '#0b0d10'; if (it.on) ctx.fillText('ON', tx + 6, ty + 14); else { ctx.fillStyle = '#dbeaf2'; ctx.fillText('OFF', tx + 26, ty + 14); }
+    const hp = holdOf(r.id); if (hp > 0) { ctx.fillStyle = 'rgba(255,176,0,.6)'; ctx.fillRect(r.x + 8, r.y + r.h - 3, (r.w - 16) * Math.min(1, hp), 3); }
+  }
+}
+function drawDust(ctx, b) { if (!b.p2.length) return; ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (const p of b.p2) { ctx.fillStyle = 'rgba(' + p.col + ',' + (.75 * (1 - p.life / 3.5)).toFixed(2) + ')'; ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3); } ctx.restore(); }
+function drawRock(ctx, r, x, y, s) {
+  const seed = r.name.length; ctx.beginPath(); for (let i = 0; i < 9; i++) { const a = i / 9 * PIE * 2, rr = s * (.78 + .22 * Math.sin(seed * 3.1 + i * 2.3)); ctx[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr * .8); }
+  ctx.closePath(); ctx.fillStyle = r.col; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.save(); ctx.clip();
+  if (r.type === 'basalt') { ctx.fillStyle = 'rgba(0,0,0,.55)'; for (let i = 0; i < 9; i++) { ctx.beginPath(); ctx.arc(x + Math.sin(i * 7 + seed) * s * .6, y + Math.cos(i * 5 + seed) * s * .45, 2 + (i % 3), 0, PIE * 2); ctx.fill(); } }
+  else if (r.type === 'anorth') { ctx.strokeStyle = 'rgba(150,150,150,.6)'; for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.moveTo(x - s + i * s * .4, y - s); ctx.lineTo(x - s * .6 + i * s * .35, y + s); ctx.stroke(); } }
+  else { const cols = ['#5a5550', '#b5b0a8', '#3f3c39', '#d0cbc2']; for (let i = 0; i < 8; i++) { ctx.fillStyle = cols[i % 4]; ctx.fillRect(x + Math.sin(i * 3.7) * s * .6 - 6, y + Math.cos(i * 2.9) * s * .45 - 5, 10 + (i % 3) * 3, 8); } }
+  ctx.restore();
+}
+
+const STEP_DRAW = {
+  unbolt: (b, st, ctx, now) => drawBolts(b, ctx, now, -1),
+  bolt: (b, st, ctx, now) => { drawBolts(b, ctx, now, 1); if (b.R.boltStyle === 'clamp') { FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; const s = hproj(b, -.34, .55, 0); ctx.fillText('CLAMPS', s.x, s.y - 40); } },
+  remove(b, st, ctx, now) {
+    const c = proj(b.bin), pul = .55 + .45 * Math.sin(now / 200);
+    ctx.strokeStyle = 'rgba(255,176,0,' + pul + ')'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(c.x - 62, c.y - 40); ctx.lineTo(c.x + 62, c.y - 40); ctx.lineTo(c.x + 48, c.y + 44); ctx.lineTo(c.x - 48, c.y + 44); ctx.closePath(); ctx.stroke();
+    if (b.unit && !b.unit.held) { const u = proj(b.unit.g.getWorldPosition(tmpV)); ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(c.x, c.y - 40); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.fillStyle = '#ffb000'; FONT(ctx, 13, 700); ctx.fillText('SCRAP BIN', c.x, c.y + 8);
+  },
+  fit(b, st, ctx, now) {
+    const s = proj(b.holder.getWorldPosition(tmpV));
+    dashRing(ctx, s.x, s.y, 46 + 4 * Math.sin(now / 180), 'rgba(93,255,158,.8)', true); FONT(ctx, 12, 700); ctx.fillStyle = '#5dff9e'; ctx.fillText('SOCKET', s.x, s.y - 58);
+    FONT(ctx, 12, 600); for (const it of b.rack) { if (it.held) continue; const p = proj(tmpV.copy(it.slot).setY(it.slot.y - .62)); ctx.fillStyle = 'rgba(93,255,158,.9)'; ctx.fillText(lname(it.def), p.x, p.y); }
+  },
+  wipe(b, st, ctx, now, w, h) { const bw = Math.min(320, w - 40); bar(ctx, w / 2 - bw / 2, h - 96, bw, (st.p || 0) / st.goal, (st.p || 0) < st.goal ? '#ffb000' : '#5dff9e', st.gauge(clamp((st.p || 0) / st.goal, 0, 1))); },
+  tune(b, st, ctx, now, w) {
+    const o = b.tn, rz = o.base - b.err, ax = o.dc.clone().sub(o.pc).applyAxisAngle(ZAX, rz).add(o.pc), dir = o.n0.clone().applyAxisAngle(ZAX, rz);
+    const a = proj(b.holder.localToWorld(tmpV.copy(ax))), e = proj(b.holder.localToWorld(tmpV.copy(ax).addScaledVector(dir, o.dist * 1.6))), ep = proj(b.target.getWorldPosition(tmpV));
+    const sig = Math.pow(Math.max(0, Math.cos(b.err)), 12), col = '255,210,74';
+    ctx.strokeStyle = 'rgba(' + col + ',.85)'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]); ctx.lineDashOffset = -now / 30;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(e.x, e.y); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    FONT(ctx, 12, 700); ctx.fillStyle = 'rgb(' + col + ')'; ctx.fillText(o.label, ep.x, ep.y - 22); ctx.fillText('PANEL FACING', a.x, a.y - 14);
+    const k = proj(b.knob.getWorldPosition(tmpV));
+    dashRing(ctx, k.x, k.y, 86, b.knobAct ? 'rgba(255,176,0,1)' : 'rgba(255,176,0,.5)', !b.knobAct); turnArrow(ctx, k.x - 30, k.y - 70, 26, -1, .8); turnArrow(ctx, k.x + 30, k.y - 70, 26, 1, .8);
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; ctx.fillText('TILT KNOB', k.x, k.y + 108);
+    const px = w - 250, py = 76; panel(ctx, px, py, 234, 60);
+    for (let i = 0; i < 10; i++) { ctx.fillStyle = sig * 10 > i + .3 ? '#ffd24a' : 'rgba(219,234,242,.15)'; ctx.fillRect(px + 14 + i * 12, py + 32 - i * 1.6, 8, 12 + i * 1.6); }
+    ctx.textAlign = 'left'; FONT(ctx, 12, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(o.meter + ' ' + Math.round(sig * 100) + '%', px + 142, py + 22);
+    FONT(ctx, 12); ctx.fillStyle = '#9fd8ea'; ctx.fillText(Math.abs(b.err * 180 / PIE).toFixed(0) + '° from the Sun', px + 142, py + 42); ctx.textAlign = 'center';
+    if (o.limit && Math.abs(Math.abs(b.err) - o.limit) < .02) { FONT(ctx, 14, 700); ctx.fillStyle = '#ff9a3c'; ctx.fillText('Limit reached: stuck in soft soil, Spirit cannot tilt any further', w / 2, 96); }
+  },
+  tension(b, st, ctx, now, w, h) {
+    const hk = st.hk; if (!hk) return;
+    dashRing(ctx, hk.x, hk.y, 20 + 3 * Math.sin(now / 150), st.hooked ? '#5dff9e' : 'rgba(255,176,0,.9)', !st.hooked);
+    ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(hk.x, hk.y - 4, 8, PIE * .1, PIE * 1.1); ctx.stroke();
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; ctx.fillText(st.label, hk.x, hk.y - 30);
+    if (st.mouse) { const c = (st.ten || 0) >= .65 ? '#ffe94d' : '#00f0ff'; ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 18; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(hk.x, hk.y); ctx.lineTo(MS.x, MS.y); ctx.stroke(); ctx.restore(); }
+    const bw = Math.min(320, w - 40), x = w / 2 - bw / 2, y = h - 112;
+    ctx.fillStyle = 'rgba(5,9,16,.75)'; ctx.fillRect(x, y, bw, 10); ctx.fillStyle = 'rgba(255,233,77,.25)'; ctx.fillRect(x + bw * .65, y, bw * .35, 10);
+    ctx.fillStyle = (st.ten || 0) >= .65 ? '#ffe94d' : '#ff2bd6'; ctx.fillRect(x, y, bw * (st.ten || 0), 10);
+    FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(!st.hooked ? (H[0] && H[1] || G.mouseOnly ? 'Catch the string on the ' + st.label.toLowerCase() : 'Raise both hands to stretch the strings') : (st.ten || 0) < .65 ? 'Pull harder: spread your hands' : 'Taut! Hold it…', w / 2, y - 8);
+    bar(ctx, x, y + 22, bw, st.p / st.need, '#5dff9e');
+  },
+  switches(b, st, ctx, now, w, h) {
+    const L = swLayout(st, w, h); panel(ctx, L.x, L.y, L.w, 64 + st.items.length * 44);
+    ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText(st.title, L.x + 14, L.y + 22);
+    if (st.mode === 'shed') { const load = st.items.reduce((a, it) => a + (it.on ? it.w : 0), 0), over = load > st.supply; FONT(ctx, 13, 700); ctx.fillStyle = over ? '#ff6b5a' : '#5dff9e'; ctx.fillText('Load ' + load + ' Wh/sol  ·  solar supply about ' + st.supply + ' Wh/sol', L.x + 14, L.y + 42); }
+    else { FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('Front and rear steering are separate circuits', L.x + 14, L.y + 42); }
+    drawToggleRows(ctx, L.rows.map(r => Object.assign(r, { unit: ' Wh/sol' }))); ctx.textAlign = 'center';
+  },
+  handle(b, st, ctx, now) {
+    const tp = st.tp; if (!tp) return;
+    ctx.fillStyle = 'rgba(255,176,0,' + (st.held ? .55 : .25 + .2 * Math.sin(now / 160)) + ')'; ctx.beginPath(); ctx.arc(tp.x, tp.y, 18, 0, PIE * 2); ctx.fill();
+    dashRing(ctx, tp.x, tp.y, 38, st.held ? '#5dff9e' : 'rgba(255,176,0,.8)', !st.held);
+    ctx.strokeStyle = ctx.fillStyle = 'rgba(255,176,0,.85)'; ctx.lineWidth = 3;
+    for (const s of [-1, 1]) { const ex = tp.x + s * 84; ctx.beginPath(); ctx.moveTo(tp.x + s * 46, tp.y); ctx.lineTo(ex, tp.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex + s * 8, tp.y); ctx.lineTo(ex - s * 2, tp.y - 7); ctx.lineTo(ex - s * 2, tp.y + 7); ctx.fill(); }
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; ctx.fillText('T-HANDLE', tp.x, tp.y - 50); ctx.fillStyle = '#fff'; ctx.fillText('Tilts ' + Math.min(st.n, st.need || 4) + ' / ' + (st.need || 4), tp.x, tp.y + 62);
+    const f = hproj(b, 1.15, 0, 1.55), r = hproj(b, -1.15, 0, 1.55), moving = Math.abs(st.a) > .2;
+    FONT(ctx, 14, 700); ctx.fillStyle = st.front ? '#5dff9e' : moving ? '#ff6b5a' : '#dbeaf2'; ctx.fillText('FRONT WHEELS: ' + (st.front ? (moving ? 'steering ✓' : 'ready') : moving ? 'no response ✗' : 'waiting'), f.x, f.y + 20);
+    ctx.fillStyle = moving ? '#5dff9e' : '#dbeaf2'; ctx.fillText('REAR WHEELS: ' + (moving ? 'steering ✓' : 'waiting'), r.x, r.y + 20);
+  },
+  route(b, st, ctx, now, w, h) {
+    const R = mapRect(w, h), ev = st.ev;
+    ctx.fillStyle = '#2b2c30'; ctx.fillRect(R.x, R.y, R.w, R.h);
+    const gr = ctx.createLinearGradient(0, R.y + R.h * .78, 0, R.y + R.h); gr.addColorStop(0, 'rgba(120,120,125,0)'); gr.addColorStop(1, 'rgba(150,150,155,.45)'); ctx.fillStyle = gr; ctx.fillRect(R.x, R.y + R.h * .78, R.w, R.h * .22);
+    const g2 = ctx.createRadialGradient(R.x + R.w, R.y, 0, R.x + R.w, R.y, R.w * .35); g2.addColorStop(0, 'rgba(150,150,155,.45)'); g2.addColorStop(1, 'rgba(150,150,155,0)'); ctx.fillStyle = g2; ctx.fillRect(R.x, R.y, R.w, R.h);
+    ctx.strokeStyle = 'rgba(70,217,255,.35)'; ctx.strokeRect(R.x + .5, R.y + .5, R.w, R.h);
+    ctx.strokeStyle = '#121214'; ctx.lineWidth = Math.max(10, R.w * .028); ctx.lineJoin = 'round'; ctx.beginPath(); A15.rille.forEach(([x, y], i) => ctx[i ? 'lineTo' : 'moveTo'](R.x + x * R.w, R.y + y * R.h)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(200,200,205,.25)'; ctx.lineWidth = 2; ctx.stroke();
+    for (const [x, y, r] of A15.craters) { ctx.strokeStyle = 'rgba(200,200,205,.4)'; ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.arc(R.x + x * R.w, R.y + y * R.h, r * R.w, 0, PIE * 2); ctx.fill(); ctx.stroke(); }
+    ctx.textAlign = 'center'; FONT(ctx, 11, 700); ctx.fillStyle = 'rgba(219,234,242,.55)';
+    ctx.fillText('HADLEY RILLE', R.x + .11 * R.w, R.y + .62 * R.h); ctx.fillText('MOUNT HADLEY DELTA', R.x + .5 * R.w, R.y + .97 * R.h); ctx.fillText('MOUNT HADLEY', R.x + .88 * R.w, R.y + .08 * R.h); ctx.fillText('rough ground = craters', R.x + R.w - 80, R.y + R.h - 12);
+    const pts = ev.pts.map(p => mpt(R, p));
+    ctx.strokeStyle = ev.problems.length ? 'rgba(255,107,90,.85)' : '#5dff9e'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); pts.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x, p.y)); ctx.stroke(); ctx.setLineDash([]);
+    const lm = mpt(R, A15.lm); ctx.fillStyle = '#ffb000'; ctx.beginPath(); ctx.moveTo(lm.x, lm.y - 12); ctx.lineTo(lm.x + 10, lm.y + 8); ctx.lineTo(lm.x - 10, lm.y + 8); ctx.closePath(); ctx.fill(); FONT(ctx, 12, 700); ctx.fillText('FALCON (LM)', lm.x, lm.y + 24);
+    A15.stations.forEach(s => {
+      const p = mpt(R, s), i = st.ids.indexOf(s.id), hot = TS.some(S => S.swKey === s.id);
+      ctx.fillStyle = i >= 0 ? '#5dff9e' : hot ? 'rgba(70,217,255,.5)' : 'rgba(5,9,16,.85)'; ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, PIE * 2); ctx.fill(); ctx.strokeStyle = s.rille ? '#46d9ff' : '#ffb000'; ctx.lineWidth = 2; ctx.stroke();
+      FONT(ctx, 13, 700); ctx.fillStyle = i >= 0 ? '#0b0d10' : '#fff'; ctx.fillText(i >= 0 ? String(i + 1) : '+' + s.sci, p.x, p.y + 5);
+      const hp = holdOf(s.id); if (hp > 0) { ctx.strokeStyle = '#46d9ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, 22, -PIE / 2, -PIE / 2 + hp * PIE * 2); ctx.stroke(); }
+      FONT(ctx, 12, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(s.name, p.x, p.y - 24); if (hot) { FONT(ctx, 11); ctx.fillStyle = '#9fd8ea'; ctx.fillText(s.note, p.x, p.y + 32); }
+    });
+    if (st.drive) { const k = clamp(st.drive.k, 0, 1); let tot = 0; const segs = []; for (let i = 0; i < pts.length - 1; i++) { const l = dd(pts[i], pts[i + 1]); segs.push(l); tot += l; }
+      let d = k * tot, i = 0; while (i < segs.length - 1 && d > segs[i]) { d -= segs[i]; i++; } const u = segs[i] ? d / segs[i] : 0, x = pts[i].x + (pts[i + 1].x - pts[i].x) * u, y = pts[i].y + (pts[i + 1].y - pts[i].y) * u;
+      ctx.fillStyle = '#fff'; ctx.fillRect(x - 9, y - 6, 18, 12); ctx.fillStyle = '#46d9ff'; ctx.fillRect(x - 9, y - 6, 18, 3); }
+    const y0 = R.y + R.h + 22; ctx.textAlign = 'left'; FONT(ctx, 13, 600);
+    const stat = (t, ok, x) => { ctx.fillStyle = ok ? '#5dff9e' : '#ff6b5a'; ctx.fillText(t, x, y0); };
+    stat('Distance ' + ev.km.toFixed(1) + ' km', true, R.x); stat('Moonwalk ' + ev.t.toFixed(1) + ' / ' + A15.evaH + ' h', A15.evaH - ev.t >= A15.reserve, R.x + R.w * .2);
+    stat('Battery left ' + Math.round(ev.batt) + '%', ev.batt >= A15.minBatt, R.x + R.w * .42); stat('Walkback margin ' + (ev.worst > 50 ? '–' : ev.worst.toFixed(1) + ' h'), ev.worst >= 0, R.x + R.w * .6); stat('Science ' + ev.sci + ' / ' + A15.minSci, ev.sci >= A15.minSci, R.x + R.w * .82);
+    if (!st.drive) { drawBtn(ctx, { id: 'clear', x: R.x, y: st.btnY || y0 + 14, w: 150, h: 52 }, 'Clear route'); drawBtn(ctx, { id: 'drive', x: R.x + R.w - 170, y: st.btnY || y0 + 14, w: 170, h: 52 }, 'Drive', { primary: true });
+      ctx.textAlign = 'center'; FONT(ctx, 12); ctx.fillStyle = ev.problems.length ? '#ff9a8a' : '#5dff9e'; ctx.fillText(ev.problems.length ? ev.problems[0] : 'Route is safe: press Drive', R.x + R.w / 2, (st.btnY || y0 + 14) + 30); }
+    ctx.textAlign = 'right'; FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.fillText('Simplified map and game values, not to scale', R.x + R.w - 6, R.y + 14); ctx.textAlign = 'center';
+  },
+  samples(b, st, ctx, now, w, h) {
+    const L = sampleLayout(w, h), R = L.R; panel(ctx, R.x, R.y, R.w, R.h);
+    ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SAMPLE BAGS · sort each rock by how it looks', R.x + 14, R.y + 22);
+    for (const bn of L.bins) { ctx.strokeStyle = 'rgba(70,217,255,.5)'; ctx.setLineDash([6, 5]); ctx.strokeRect(bn.x, bn.y, bn.w, bn.h); ctx.setLineDash([]);
+      ctx.textAlign = 'center'; FONT(ctx, 15, 700); ctx.fillStyle = '#fff'; ctx.fillText(bn.b.name, bn.x + bn.w / 2, bn.y + 24); FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.7)'; wrapLines(ctx, bn.b.desc, bn.w - 20).forEach((ln, i) => ctx.fillText(ln, bn.x + bn.w / 2, bn.y + 44 + i * 16)); }
+    st.rocks.forEach(r => { if (r.done) { const bn = L.bins[r.bin], i = st.rocks.filter(x => x.done && x.bin === r.bin).indexOf(r); drawRock(ctx, r, bn.x + 40 + i * 60, bn.y + bn.h - 40, 22); } else drawRock(ctx, r, r.x, r.y, r.held ? 40 : 34); });
+    st.rocks.forEach(r => { if (!r.done && !r.held) { FONT(ctx, 12, 600); ctx.textAlign = 'center'; ctx.fillStyle = '#dbeaf2'; wrapLines(ctx, r.name, 130).forEach((ln, i) => ctx.fillText(ln, r.x, r.y + 48 + i * 15)); } });
+    if (st.look) { const r = st.look; FONT(ctx, 13); const lines = wrapLines(ctx, 'Looks: ' + r.look, 240), bx = Math.min(r.x + 40, w - 270); panel(ctx, bx, r.y - 70, 260, 16 + lines.length * 17); ctx.textAlign = 'left'; ctx.fillStyle = '#ffb000'; lines.forEach((ln, i) => ctx.fillText(ln, bx + 10, r.y - 50 + i * 17)); }
+    ctx.textAlign = 'center';
+  },
+  dusttest(b, st, ctx, now, w, h) {
+    const c = st.c; if (!c) return;
+    ctx.strokeStyle = 'rgba(255,107,90,.7)'; ctx.setLineDash([8, 6]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(c.x - w * .4, st.seatY); ctx.lineTo(c.x + w * .3, st.seatY); ctx.stroke(); ctx.setLineDash([]);
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ff8a7a'; ctx.textAlign = 'left'; ctx.fillText('CREW SEAT HEIGHT', c.x - w * .4, st.seatY - 8); ctx.textAlign = 'center';
+    dashRing(ctx, c.x, c.y, b.S * 70 * .45 + 20, st.act ? '#ffb000' : 'rgba(255,176,0,.5)', !st.act); progRing(ctx, c.x, c.y, b.S * 70 * .45 + 20, st.rot / st.need, 1, '#5dff9e'); turnArrow(ctx, c.x, c.y, b.S * 70 * .45 + 34, 1, .8);
+    const bw = Math.min(300, w - 40), x = w - bw - 30, y = 90; panel(ctx, x - 14, y - 30, bw + 28, rover.dust.before != null && st.when === 'after' ? 110 : 70);
+    bar(ctx, x, y, bw, st.pct || 0, '#ff6b5a', (st.when === 'after' ? 'With new fender: ' : 'Broken fender: ') + Math.round((st.pct || 0) * 100) + '% of dust above seat height');
+    if (rover.dust.before != null && st.when === 'after') bar(ctx, x, y + 46, bw, rover.dust.before, 'rgba(255,107,90,.5)', 'Before the repair: ' + Math.round(rover.dust.before * 100) + '%');
+  },
+  assemble(b, st, ctx, now) {
+    for (const t of st.targets) {
+      if (t.filled || (!t.ok) || (st.set === 'fender' && !(st.miss || now - G.hintT < 5000))) continue;
+      const cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => { const v = V(sx * t.w / 2 * t.s, sy * t.h / 2 * t.s, 0).applyAxisAngle(ZAX, t.rz).add(t.p); return proj(t.parent.localToWorld(v)); });
+      ctx.strokeStyle = 'rgba(93,255,158,' + (.5 + .3 * Math.sin(now / 200)) + ')'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]); ctx.beginPath(); cs.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x, p.y)); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (st.set === 'maps') { const p = proj(b.asm.localToWorld(tmpV.set(0, .2, 0))); FONT(ctx, 12, 700); ctx.fillStyle = '#5dff9e'; ctx.fillText('WORKBENCH', p.x, p.y - 20); const r = proj(st.items[0].home.p); ctx.fillStyle = '#ffb000'; ctx.fillText('LUNAR MAPS (laminated)', r.x + 110, r.y + 70); }
+    else { const p = hproj(b, -.4, .5, 0); FONT(ctx, 12, 700); ctx.fillStyle = '#ff8a7a'; ctx.fillText('BROKEN EXTENSION', p.x - 40, p.y - 50); }
+  },
+  tape(b, st, ctx, now) {
+    if (!st.A) return; const seam = st.seams.find(s => !s.done);
+    ctx.strokeStyle = 'rgba(255,233,77,' + (.6 + .3 * Math.sin(now / 150)) + ')'; ctx.lineWidth = 4; ctx.setLineDash([10, 6]); ctx.beginPath(); ctx.moveTo(st.A.x, st.A.y); ctx.lineTo(st.C.x, st.C.y); ctx.stroke(); ctx.setLineDash([]);
+    for (const p of [st.A, st.C]) { ctx.fillStyle = 'rgba(255,233,77,.8)'; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, PIE * 2); ctx.fill(); }
+    if (seam && seam.hold > 0) progRing(ctx, (st.A.x + st.C.x) / 2, (st.A.y + st.C.y) / 2, 30, seam.hold / .6, 1, '#5dff9e');
+    if (st.md) { ctx.strokeStyle = 'rgba(170,174,180,.9)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.moveTo(st.md.from.x, st.md.from.y); ctx.lineTo(MS.x, MS.y); ctx.stroke(); }
+    FONT(ctx, 14, 700); ctx.fillStyle = '#fff'; ctx.fillText(st.msg || (H[0] && H[1] ? '' : G.mouseOnly ? 'Drag along the seam from one end to the other' : 'Raise both hands: the string between your index fingers is the tape'), (st.A.x + st.C.x) / 2, Math.max(st.A.y, st.C.y) + 46);
+    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('Seams taped: ' + st.seams.filter(s => s.done).length + ' / ' + st.seams.length, (st.A.x + st.C.x) / 2, Math.max(st.A.y, st.C.y) + 66);
+  },
+  motortest(b, st, ctx, now, w) {
+    const c = st.c; if (!c) return; const r = b.S * 70 * .38 + 20;
+    dashRing(ctx, c.x, c.y, r, st.act ? '#ffb000' : 'rgba(255,176,0,.5)', !st.act); progRing(ctx, c.x, c.y, r, st.cmd / 7, 1, '#46d9ff'); turnArrow(ctx, c.x, c.y, r + 14, 1, .8);
+    const x = w - 330, y = 90; panel(ctx, x - 14, y - 30, 314, 130);
+    bar(ctx, x, y, 286, st.cur, st.cur > .5 ? '#ff6b5a' : '#ffb000', 'Motor current (drawing power)'); bar(ctx, x, y + 44, 286, st.cmd / 7, '#46d9ff', 'Commanded: ' + Math.round(st.cmd * 57) + '°');
+    bar(ctx, x, y + 88, 286, 0, '#5dff9e', 'Actual wheel rotation: 0°');
+  },
+  traction(b, st, ctx, now, w, h) {
+    const L = tracLayout(w, h); panel(ctx, L.x, L.y, L.w, L.h);
+    ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('ESCAPE EXPERIMENT · choose a move', L.x + 14, L.y + 22);
+    for (const m of L.modes) drawBtn(ctx, m, m.lab, { on: st.mode === m.id, disabled: st.anim > 0 });
+    drawSlider(ctx, L.slider, st.speed, 'Wheel speed: ' + (st.speed < .35 ? 'slow' : st.speed > .7 ? 'fast' : 'medium'), 'spd'); drawBtn(ctx, L.go, st.anim > 0 ? 'Driving…' : 'Try drive', { primary: true, disabled: st.anim > 0 });
+    const gx = L.x + L.w + 16 > w - 220 ? L.x : L.x + L.w + 16, gy = gx === L.x ? L.y - 150 : L.y, last = st.tries[st.tries.length - 1];
+    panel(ctx, gx, gy, 220, 140); ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('TRACTION READINGS', gx + 12, gy + 20);
+    bar(ctx, gx + 12, gy + 46, 196, last ? last.slip : 0, '#ff6b5a', 'Wheel slip ' + (last ? Math.round(last.slip * 100) : 0) + '%'); bar(ctx, gx + 12, gy + 86, 196, st.sink / 15, '#ffb000', 'Sinkage ' + st.sink.toFixed(1) + ' cm');
+    bar(ctx, gx + 12, gy + 126, 196, st.prog / 15, '#5dff9e', 'Progress ' + st.prog.toFixed(1) + ' cm');
+    ctx.textAlign = 'left'; FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('Attempts ' + st.tries.length + ' (try at least 3, including one slow move)', L.x + 14, L.y + L.h - 12); ctx.textAlign = 'center';
+  },
+  storm(b, st, ctx, now, w, h) {
+    const L = stormLayout(w, h), R = L.R, tau = tauAt(st.v), pw = powerAt(tau), day = Math.round(30 + st.v * 11), date = day <= 31 ? day + ' May 2018' : (day - 31) + ' June 2018';
+    panel(ctx, R.x, R.y, R.w, R.h);
+    const sx = R.x + 110, sy = R.y + 120, sr = 46, tr = Math.exp(-tau / 2.2);
+    const sky = ctx.createRadialGradient(sx, sy, 0, sx, sy, 140); sky.addColorStop(0, 'rgba(' + (230 * tr + 90 | 0) + ',' + (190 * tr + 60 | 0) + ',' + (140 * tr + 40 | 0) + ',1)'); sky.addColorStop(1, 'rgba(60,35,20,1)');
+    ctx.fillStyle = sky; ctx.fillRect(R.x + 10, R.y + 30, 200, 180); ctx.fillStyle = 'rgba(255,245,220,' + (.15 + .85 * tr).toFixed(2) + ')'; ctx.beginPath(); ctx.arc(sx, sy, sr * (.6 + .4 * tr), 0, PIE * 2); ctx.fill();
+    ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SKY ABOVE OPPORTUNITY', R.x + 14, R.y + 22);
+    FONT(ctx, 26, 600); ctx.fillStyle = '#fff'; ctx.fillText(date, R.x + 230, R.y + 60); FONT(ctx, 13); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('around sol ' + Math.round(5100 + st.v * 11), R.x + 230, R.y + 82);
+    bar(ctx, R.x + 230, R.y + 120, R.w - 470, tau / 11, '#ff9a3c'); FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.textAlign = 'left'; ctx.fillText('Sky opacity (tau) ' + tau.toFixed(1), R.x + 230, R.y + 112);
+    bar(ctx, R.x + 230, R.y + 170, R.w - 470, pw / 645, pw > 150 ? '#5dff9e' : '#ff6b5a'); ctx.textAlign = 'left'; ctx.fillStyle = '#dbeaf2'; ctx.fillText('Solar energy about ' + Math.round(pw) + ' watt-hours per sol', R.x + 230, R.y + 162);
+    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.75)'; ctx.fillText('Pancam photos of the Sun: ' + st.reads.map(r => 'tau ' + r.tau.toFixed(1)).join(', ') + (st.reads.length < 3 ? '  (take ' + (3 - st.reads.length) + ' more)' : ''), R.x + 14, R.y + 240);
+    FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText('Approximate values based on NASA reports: about 645 Wh at the start, about 22 Wh by 10 June.', R.x + 14, R.y + 262);
+    drawBtn(ctx, L.snap, '📷 Photograph the Sun', { primary: true }); drawSlider(ctx, L.slider, st.v, 'Storm timeline: drag forward', 'sol'); ctx.textAlign = 'center';
+  },
+  energy(b, st, ctx, now, w, h) {
+    const L = energyLayout(w, h), R = L.R, rows = st.items.map((it, i) => ({ id: 'sw' + i, it, x: L.list.x, y: L.list.y + 30 + i * 44, w: L.list.w, h: 38, unit: ' Wh/sol' }));
+    panel(ctx, L.list.x, L.list.y, L.list.w, 40 + rows.length * 44); ctx.textAlign = 'left'; FONT(ctx, 12, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('SYSTEMS (energy used per sol)', L.list.x + 14, L.list.y + 20);
+    drawToggleRows(ctx, rows);
+    const Gr = L.graph; panel(ctx, Gr.x, Gr.y, Gr.w, Gr.h); FONT(ctx, 12, 700); ctx.textAlign = 'left'; ctx.fillStyle = '#46d9ff'; ctx.fillText('SUNLIGHT · BATTERY · TEMPERATURE', Gr.x + 12, Gr.y + 20);
+    const n = ENERGY.sols, cw = (Gr.w - 30) / n, base = Gr.y + Gr.h - 24, gh = Gr.h - 60;
+    st.log.forEach((s, i) => { const x = Gr.x + 15 + i * cw; ctx.fillStyle = 'rgba(255,210,74,.55)'; ctx.fillRect(x + 2, base - gh * s.solar / 645, cw * .4, gh * s.solar / 645); ctx.fillStyle = s.temp < -40 ? '#46d9ff' : 'rgba(219,234,242,.4)'; ctx.fillRect(x + cw * .55, base - 6, cw * .35, 6); });
+    ctx.strokeStyle = '#5dff9e'; ctx.lineWidth = 2.5; ctx.beginPath(); [ENERGY.start, ...st.log.map(s => s.batt)].forEach((v, i) => ctx[i ? 'lineTo' : 'moveTo'](Gr.x + 15 + i * cw, base - gh * v / 100)); ctx.stroke();
+    FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.7)'; ctx.fillText('yellow: sunlight · green: battery ' + Math.round(st.batt) + '% · blue marks: below −40 °C (' + st.cold + ')', Gr.x + 12, Gr.y + Gr.h - 6);
+    if (!st.run) drawBtn(ctx, L.run, '▶ Run the storm', { primary: true });
+    else { ctx.textAlign = 'left'; FONT(ctx, 14, 700); ctx.fillStyle = st.over ? (st.fault ? '#ff6b5a' : '#5dff9e') : '#ffb000'; ctx.fillText(st.over ? (st.fault ? 'LOW-POWER FAULT' : 'Survived the peak (in this model)') : 'Sol ' + (st.sol + 1) + ' of ' + n + '… tau ' + (2 + 8.8 * st.sol / (n - 1)).toFixed(1), L.run.x, L.run.y + 30); }
+    FONT(ctx, 11); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'left'; ctx.fillText('Simplified model with game values. Storm nights are less cold because dust traps heat.', R.x, R.y + R.h + 18); ctx.textAlign = 'center';
+  },
+  comm(b, st, ctx, now, w, h) {
+    const L = commLayout(w, h), R = L.R; panel(ctx, R.x, R.y, R.w, R.h);
+    const ex = R.x + 90, mx = R.x + R.w - 90, cy = R.y + 110, months = ['June 2018', 'July', 'August', 'September', 'October', 'November', 'December', 'January 2019', 'February 2019'], mi = Math.min(8, Math.round(st.v * 8)), tau = 10.8 - 9.8 * Math.min(1, st.v / .7);
+    ctx.fillStyle = '#2f6bd8'; ctx.beginPath(); ctx.arc(ex, cy, 34, 0, PIE * 2); ctx.fill(); ctx.fillStyle = '#c1440e'; ctx.beginPath(); ctx.arc(mx, cy, 24, 0, PIE * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(160,110,70,' + (.7 * (1 - st.v)).toFixed(2) + ')'; ctx.beginPath(); ctx.arc(mx, cy, 30, 0, PIE * 2); ctx.fill();
+    FONT(ctx, 12, 700); ctx.textAlign = 'center'; ctx.fillStyle = '#dbeaf2'; ctx.fillText('EARTH · Deep Space Network', ex, cy + 56); ctx.fillText('MARS · Opportunity', mx, cy + 56);
+    if (st.phase !== 'idle') { const k = clamp(st.clk / (st.phase === 'out' ? 2.2 : 2.6), 0, 1), x = st.phase === 'out' ? ex + (mx - ex) * k : mx - (mx - ex) * k;
+      if (st.phase === 'out' || st.hypo) { ctx.fillStyle = st.phase === 'out' ? '#46d9ff' : '#ff9a3c'; ctx.beginPath(); ctx.arc(x, cy, 6, 0, PIE * 2); ctx.fill(); }
+      FONT(ctx, 13, 600); ctx.fillStyle = '#ffb000'; ctx.fillText(st.phase === 'out' ? 'Command travelling to Mars…' : 'Listening for a reply…', (ex + mx) / 2, cy - 50); }
+    else if (st.tries || st.reply) { FONT(ctx, 14, 700); ctx.fillStyle = st.reply ? '#ff9a3c' : '#ff6b5a'; ctx.fillText(st.reply ? 'HYPOTHETICAL: reply received!' : 'No reply', (ex + mx) / 2, cy - 50); }
+    ctx.textAlign = 'left'; FONT(ctx, 13); ctx.fillStyle = '#dbeaf2';
+    ctx.fillText(months[mi] + ' · sky opacity (tau) about ' + Math.max(1, tau).toFixed(1) + (st.v > .55 ? ' · sky clear enough to try' : ' · still too dark'), R.x + 20, R.y + 200);
+    ctx.fillText('Radio takes several minutes each way between Earth and Mars (here sped up).', R.x + 20, R.y + 222);
+    ctx.fillText('Your commands: ' + st.tries + '   ·   NASA sent more than 1,000 between June 2018 and February 2019.', R.x + 20, R.y + 244);
+    drawBtn(ctx, L.tx, 'Transmit wake-up', { primary: true, disabled: !(st.v > .55) || st.phase !== 'idle' }); drawBtn(ctx, L.hypo, 'Hypothetical: wind cleans panels', { disabled: st.tries < 3 || st.phase !== 'idle' });
+    drawBtn(ctx, L.fin, 'Accept the outcome', { disabled: st.tries < 3 || st.phase !== 'idle' });
+    if (st.phase === 'idle') drawSlider(ctx, L.slider, st.v, 'Months after the storm: drag forward', 'month');
+    ctx.textAlign = 'center';
+  },
+};
+function drawBolts(b, ctx, now, dir) {
+  const cue = b.bolts.find(x => x.act && !x.done) || b.bolts.find(x => !x.done);
+  for (const bo of b.bolts) {
+    if (bo.done && dir < 0) continue;
+    const s = proj(bo.g.getWorldPosition(tmpV));
+    if (bo.done) { FONT(ctx, 14, 700); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓', s.x, s.y - 26); continue; }
+    dashRing(ctx, s.x, s.y, 26, bo.act ? '#ffb000' : 'rgba(255,176,0,.5)', !bo.act); progRing(ctx, s.x, s.y, 26, bo.prog, dir, '#5dff9e');
+    if (bo === cue) turnArrow(ctx, s.x, s.y, 38, dir, bo.act ? 1 : .6);
+    if (now - bo.wrongT < 900) { FONT(ctx, 13, 700); ctx.fillStyle = '#ff6b5a'; ctx.fillText('Other way ' + (dir < 0 ? '↺' : '↻'), s.x, s.y + 54); }
+  }
+}
+function stepCount(b, st) {
+  if (st.t === 'unbolt' || st.t === 'bolt') return '  (' + b.bolts.filter(x => x.done).length + '/' + b.bolts.length + ')';
+  if (st.t === 'wipe') return '  (' + Math.round(100 * clamp((st.p || 0) / st.goal, 0, 1)) + '%)';
+  if (st.t === 'handle') return '  (' + Math.min(st.n || 0, st.need || 4) + '/' + (st.need || 4) + ')';
+  if (st.t === 'samples' && st.rocks) return '  (' + st.rocks.filter(r => r.done).length + '/' + st.rocks.length + ')';
+  if (st.t === 'tape' && st.seams) return '  (' + st.seams.filter(s => s.done).length + '/' + st.seams.length + ')';
+  if (st.t === 'assemble' && st.items) return '  (' + st.items.filter(x => x.placed).length + '/' + st.items.length + ')';
+  if (st.t === 'traction' && st.tries) return '  (' + st.tries.length + ')';
+  if (st.t === 'storm' && st.reads) return '  (' + st.reads.length + '/3 photos)';
+  if (st.t === 'comm') return '  (' + (st.tries || 0) + ')';
+  return '';
+}
+function benchHud(ctx, w, h, now) {
+  const st = B.done ? null : B.steps[B.si], t = B.task;
+  drawDust(ctx, B);
+  ctx.textAlign = 'center';
+  if (st && STEP_DRAW[st.t]) STEP_DRAW[st.t](B, st, ctx, now, w, h);
+  const wide = w >= 900, pw = wide ? 360 : w - 32; FONT(ctx, 12);
+  const hist = wide ? wrapLines(ctx, t.when + ': ' + t.history, pw - 24).slice(0, 6) : [], n = B.steps.length;
+  panel(ctx, 16, 16, pw, (wide ? 100 + hist.length * 16 + n * 22 : 62));
+  ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = LABEL[t.label][1]; ctx.fillText(LABEL[t.label][0] + '  ·  ' + rover.C.short.toUpperCase(), 28, 34);
+  FONT(ctx, 15, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, 28, 54);
+  if (wide) {
+    FONT(ctx, 12); ctx.fillStyle = B.done ? '#5dff9e' : '#ff8a7a'; ctx.fillText(B.done ? 'Done' : t.text, 28, 73);
+    ctx.fillStyle = 'rgba(219,234,242,.55)'; hist.forEach((ln, i) => ctx.fillText(ln, 28, 93 + i * 16));
+    const y0 = 104 + hist.length * 16;
+    B.steps.forEach((s, i) => { const cur = i === B.si; FONT(ctx, 13, cur ? 600 : 400); ctx.fillStyle = s.done ? '#5dff9e' : cur ? '#ffffff' : 'rgba(219,234,242,.45)'; ctx.fillText((s.done ? '✓ ' : cur ? '▶ ' : (i + 1) + '. ') + (s.short || STEP[s.t].short) + (cur ? stepCount(B, s) : ''), 28, y0 + i * 22); });
+  }
+  const secs = Math.floor((now - rover.t0) / 1000);
+  ctx.textAlign = 'center'; FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText(rover.C.short + '  ·  ' + String(secs / 60 | 0).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0') + '  ·  mistakes ' + G.mistakes, w / 2, 28);
+  if (now - G.toastT < 4500) { FONT(ctx, 14); ctx.fillStyle = '#ffb000'; const lines = wrapLines(ctx, G.toast, Math.min(760, w - 60)); lines.forEach((ln, i) => ctx.fillText(ln, w / 2, 52 + i * 18)); }
+  if (st) {
+    FONT(ctx, 18, 600); ctx.fillStyle = '#fff'; ctx.fillText(st.text, w / 2, h - 52);
+    FONT(ctx, 13); ctx.fillStyle = now - G.hintT < 5000 ? '#ffb000' : 'rgba(219,234,242,.75)'; ctx.fillText(HINTS[st.t] ? HINTS[st.t][G.mouseOnly ? 1 : 0] : '', w / 2, h - 28);
+  }
+  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Esc back · F hint · I learn more · S sound', w - 16, h - 8); ctx.textAlign = 'center';
+  if (B.done) { const bx = w / 2 - 220, by = h / 2 - 50; panel(ctx, bx, by, 440, 100); FONT(ctx, 22, 600); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓ Task complete', w / 2, by + 42); FONT(ctx, 14); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, w / 2, by + 72); }
+}
+function hud(ctx, w, h, n, now) {
+  const F = (px, wt = 400) => FONT(ctx, px, wt);
+  ctx.textAlign = 'left';
+  const ts = rover.tasks, cur = currentTask(), secs = Math.floor(((rover.end || now) - rover.t0) / 1000);
+  panel(ctx, 16, 16, 340, 60 + ts.length * 22);
+  F(14, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(rover.C.short + '   ' + String(secs / 60 | 0).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0'), 28, 38);
+  ts.forEach((t, i) => { const open = unlocked(t); F(12, t === cur ? 700 : 400); ctx.fillStyle = t.done ? '#5dff9e' : t === cur ? '#fff' : open ? '#ffb000' : 'rgba(219,234,242,.4)';
+    ctx.fillText((t.done ? '✓ ' : t === cur ? '▶ ' : '• ') + t.title + (t.optional ? ' (optional)' : ''), 42, 62 + i * 22); ctx.fillStyle = LABEL[t.label][1]; ctx.fillRect(28, 54 + i * 22, 8, 8); });
+  F(11); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.fillText(rover.C.where + ' · mistakes ' + G.mistakes + (G.thermal ? ' · thermal' : '') + (G.muted ? ' · muted' : ''), 28, 66 + ts.length * 22);
+  if (!G.locked && G.armed && G.still > .05) { ctx.fillStyle = 'rgba(255,176,0,.85)'; ctx.fillRect(w - 300, 66, 280 * Math.min(1, G.still / .8), 3); }
+  if (!Z.ph && !G.panel) for (const S of TS) {
+    const q = S.hoverQ, hov = S.hover; if (!q || !hov) continue;
+    const t = availableTask(hov), pend = pendingTask(hov); F(13, 600);
+    const label = hov.def.name, sub = t ? 'Task: ' + t.title : pend ? 'Later: finish "' + (cur ? cur.title : '') + '" first' : hov.def.info, lines = (F(12), wrapLines(ctx, sub, 280));
+    F(13, 600); const bw = Math.max(ctx.measureText(label).width, 300) + 24, bx = Math.min(q.x + 24, w - bw - 10);
+    panel(ctx, bx, q.y - 20, bw, 30 + lines.length * 16); ctx.fillStyle = '#dbeaf2'; ctx.fillText(label, bx + 12, q.y);
+    F(12); ctx.fillStyle = t ? '#ffb000' : '#9fd8ea'; lines.forEach((ln, i) => ctx.fillText(ln, bx + 12, q.y + 18 + i * 16));
+    if (S.hoverT > 0 && t) { ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 20, -PIE / 2, -PIE / 2 + Math.min(1, S.hoverT / .45) * PIE * 2); ctx.stroke(); }
+  }
+  G.fx = G.fx.filter(e => now - e.t < 700);
+  for (const e of G.fx) { const k = (now - e.t) / 700; ctx.strokeStyle = 'rgba(93,255,158,' + (1 - k) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, 20 + k * 110, 0, PIE * 2); ctx.stroke(); }
+  ctx.textAlign = 'center';
+  let guide = '';
+  if (G.panel || rover.end) guide = '';
+  else if (rover.testT) guide = rover.C.env === 'MOON' ? 'Test drive' : '';
+  else if (G.mouseOnly) guide = 'Hover over the glowing part to start the next task. Drag empty space to turn the rover';
+  else if (n === 0) guide = 'Raise one hand to pick up the rover';
+  else if (n === 1 && !G.locked) guide = 'Bring your other hand in to scan';
+  else guide = 'Point at the glowing part to start the next task. Point at anything else to learn about it';
+  F(16, 600); ctx.fillStyle = '#fff'; ctx.fillText(guide, w / 2, h - 40);
+  if (now - G.toastT < 4500 && !G.panel) { F(14); ctx.fillStyle = '#ffb000'; wrapLines(ctx, G.toast, Math.min(700, w - 400)).forEach((ln, i) => ctx.fillText(ln, w / 2, 34 + i * 18)); }
+  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('M missions · L lock · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
+}
+</script>
+</body>
+</html>

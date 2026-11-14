@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover in Hand v6</title>
+<style>
+  :root { --bg:#05070c; --ink:#dbeaf2; --cyan:#46d9ff; --amber:#ffb000; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden; font-family:"Segoe UI", system-ui, sans-serif; }
+  #video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); z-index:1; filter:brightness(.55) sepia(.5) hue-rotate(-20deg) saturate(1.3); transition:opacity .45s; }
+  #gl { position:fixed; inset:0; z-index:2; pointer-events:none; transition:background .45s; }
+  canvas.p5Canvas { position:fixed; inset:0; z-index:3; }
+  #overlay { position:fixed; inset:0; z-index:9; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center;
+    background:radial-gradient(circle at 50% 35%, #2a1710, var(--bg) 70%); }
+  #overlay h1 { margin:0; font-weight:300; font-size:clamp(2rem,6vw,3.4rem); letter-spacing:.03em; }
+  #overlay p { margin:0; max-width:44em; line-height:1.6; opacity:.88; }
+  #overlay ul { margin:0; padding:0; list-style:none; max-width:46em; line-height:1.7; opacity:.7; font-size:.93rem; }
+  #overlay .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+  #overlay button { font:inherit; padding:12px 30px; border-radius:6px; cursor:pointer; color:var(--ink); background:rgba(255,176,0,.12); border:1px solid var(--amber); }
+  #overlay button:hover { background:rgba(255,176,0,.28); }
+  #overlay button.sec { background:transparent; border-color:rgba(219,234,242,.35); }
+  #overlay button.sec:hover { background:rgba(219,234,242,.1); }
+  #overlay button:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+  #msg { min-height:1.4em; color:var(--amber); font-size:.95rem; }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<canvas id="gl"></canvas>
+<div id="overlay">
+  <h1>Rover in Hand</h1>
+  <p>An abandoned rover, not forgotten. Hold it in one hand and scan it with the other. When you find a fault, the view zooms into the repair bay, where you fix that one part with your hands: undo bolts, swap parts, reconnect cables, wipe off dust.</p>
+  <ul>
+    <li><b>Holding hand</b> (left on screen): carries the rover. Tilt and twist to turn it, spread your fingers to open it up.</li>
+    <li><b>Tool hand</b> (right on screen): point at a part to scan it. Keep pointing at a faulty part to open the repair bay.</li>
+    <li><b>In the repair bay</b> both hands are tools: pinch and twist to turn bolts, pinch and drag to move parts and plugs, open hand to wipe.</li>
+    <li>Hold still to lock the rover so both hands can work. V-sign: thermal view · Fist: hint · Thumbs-up: next level</li>
+  </ul>
+  <div class="row">
+    <button id="start">Start camera</button>
+    <button id="mouse" class="sec">Try with mouse</button>
+  </div>
+  <div id="msg" role="status"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+/* ================= rover definitions ================= */
+const V = (x, y, z) => new THREE.Vector3(x, y, z), PIE = Math.PI, YAX = V(0, 1, 0), IDQ = new THREE.Quaternion();
+const BoxG = THREE.BoxGeometry, CylG = THREE.CylinderGeometry, SphG = THREE.SphereGeometry;
+const glow = c => new THREE.MeshBasicMaterial({ color: c });
+const GOLD = 0xd4a74a;
+const wheelDef = (id, nm, x, z) => ({ id, kind: 'wheel', gen: 'Wheel', name: 'Wheel (' + nm + ')', home: V(x * .95, -.42, z * .95), dir: V(x * .4, -.3, z).normalize(),
+  fault: 'Cracked wheel: tread torn, drive motor stalling',
+  build(add, M) { const r = PIE / 2;
+    add(new CylG(.33, .33, .26, 14), M(0x1c1c1e, .1, .95, 0, true), 0, 0, 0, r, 0, 0); add(new CylG(.23, .23, .28, 14), M(0x8f9aa5, .85, .3), 0, 0, 0, r, 0, 0);
+    add(new BoxG(.4, .05, .29), M(0x5f6a75, .8, .4)); add(new BoxG(.05, .4, .29), M(0x5f6a75, .8, .4)); add(new CylG(.07, .07, .33, 8), M(GOLD, .9, .3), 0, 0, 0, r, 0, 0);
+    for (let i = 0; i < 10; i++) { const a = i / 10 * PIE * 2; add(new BoxG(.05, .08, .27), M(0x111113, .1, .95), Math.cos(a) * .34, Math.sin(a) * .34, 0, 0, 0, a); } } });
+const DEFS = [
+  { id: 'chassis', kind: 'chassis', name: 'Warm electronics box', home: V(0, 0, 0), dir: V(0, 0, 0), build(add, M) {
+      add(new BoxG(2.2, .42, 1.2), M(0xd8d2c6, .5, .45)); add(new BoxG(2.26, .06, 1.26), M(GOLD, .9, .3), 0, -.22, 0); add(new BoxG(1.4, .05, .9), M(0x1d2735, .4, .4), -.2, .235, 0);
+      for (const z of [-1, 1]) { add(new BoxG(.55, .12, .03), M(0x25282d, .5, .6), .3, .04, z * .61); add(new BoxG(2.0, .05, .06), M(0xb9b9b9, .8, .4), 0, -.12, z * .8);
+        for (const x of [-.95, 0, .95]) add(new BoxG(.06, .34, .06), M(0xb9b9b9, .8, .4), x, -.25, z * .8); }
+      add(new CylG(.015, .015, .8, 6), M(0x888888, .8, .4), -.9, .65, .4);
+      add(new BoxG(.5, .02, .3), M(0x2a3b52, .4, .4), .55, .25, -.2); for (let i = 0; i < 4; i++) add(new BoxG(.3, .012, .02), M(0x1a1c20, .5, .6), -.7, .24, -.3 + i * .2);
+      add(new SphG(.03, 8, 8), glow(0xffb000), -.9, 1.05, .4); for (const z of [-.3, .3]) add(new BoxG(.4, .03, .02), M(0x444a52, .6, .4), -.2, .2, z * 2);
+      const led = add(new SphG(.045, 10, 10), new THREE.MeshBasicMaterial({ color: 0x30ff80 }), .95, .26, .5); led.userData.led = true; } },
+  { id: 'deck', kind: 'deck', name: 'Science instrument deck', home: V(.1, .36, 0), dir: V(0, 1, 0), build(add, M) {
+      add(new BoxG(.9, .2, .6), M(0x394859, .5, .5)); add(new CylG(.14, .14, .2, 14), M(0xcfd6dc, .7, .3), -.2, .2, .1); add(new BoxG(.25, .14, .2), M(GOLD, .9, .3), .2, .17, -.1); add(new CylG(.05, .05, .25, 8), M(0x25282d, .5, .5), .25, .25, .15); } },
+  { id: 'solar', kind: 'solar', name: 'Solar array', home: V(-.1, .12, 0), dir: V(0, 1, 0), fault: 'Dust on the solar array: power output down to 23%',
+    build(add, M) { for (const z of [-1, 1]) {
+      add(new BoxG(1.54, .025, .66), M(0xb9b9b9, .8, .4), 0, -.012, z * .95); add(new BoxG(1.5, .03, .62), M(0x1b2c52, .55, .22), 0, 0, z * .95);
+      for (let i = -2; i <= 2; i++) add(new BoxG(.012, .034, .6), M(0x9fb3d1, .8, .3), i * .3, .001, z * .95);
+      add(new BoxG(1.48, .034, .012), M(0x9fb3d1, .8, .3), 0, .001, z * .95); add(new BoxG(.06, .06, .3), M(0xb9b9b9, .8, .4), 0, -.03, z * .58); } } },
+  { id: 'power', kind: 'power', name: 'Battery module', home: V(-.7, .36, .05), dir: V(-.3, 1, .3).normalize(), fault: 'Battery cell imbalance: module will not hold charge',
+    build(add, M) { add(new BoxG(.5, .14, .4), M(0x2a6f4e, .4, .5)); for (let i = -1; i <= 1; i++) add(new BoxG(.08, .02, .06), glow(0x7dffb0), i * .14, .08, -.1);
+      const tc = [0xd83a2e, 0x1d1f23, 0xe8c11c]; [-.15, 0, .15].forEach((x, i) => { add(new CylG(.035, .035, .05, 12), M(0xc9d1d8, .9, .3), x, .095, .1); add(new CylG(.027, .027, .02, 12), M(tc[i], .4, .5), x, .128, .1); }); } },
+  { id: 'navcam', kind: 'navcam', name: 'Navigation camera', home: V(1.14, .12, 0), dir: V(1, .2, 0).normalize(), fault: 'Image sensor dead pixels over limit',
+    build(add, M) { add(new BoxG(.1, .13, .62), M(0x333c47, .5, .5)); for (const z of [-.2, .2]) add(new CylG(.05, .05, .06, 10), glow(0x66e6ff), .07, 0, z, 0, 0, PIE / 2); } },
+  { id: 'mast', kind: 'mast', name: 'Mast camera gimbal', home: V(.7, .3, -.35), dir: V(.5, 1, -.5).normalize(), fault: 'Pan axis jammed: dust in the joint',
+    build(add, M) { add(new CylG(.05, .05, 1, 8), M(0xb9b9b9, .7, .4), 0, .5, 0); add(new CylG(.09, .09, .12, 10), M(GOLD, .9, .3), 0, 1, 0); add(new BoxG(.46, .2, .2), M(0x444a52, .5, .5), 0, 1.12, 0);
+      for (const x of [-.13, .13]) add(new CylG(.06, .06, .08, 10), glow(0x66e6ff), x, 1.12, .12, PIE / 2, 0, 0); add(new BoxG(.2, .14, .14), M(0xcfd6dc, .6, .4), 0, 1.27, 0); } },
+  { id: 'dish', kind: 'dish', name: 'High-gain antenna drive', home: V(-.45, .3, -.45), dir: V(-.6, 1, -.6).normalize(), fault: 'Pointing drift: antenna has lost Earth',
+    build(add, M) { add(new CylG(.04, .04, .5, 8), M(0xb9b9b9, .7, .4), 0, .25, 0); add(new SphG(.08, 10, 10), M(GOLD, .9, .3), 0, .54, 0);
+      const dm = M(0xf2f2f2, .3, .5); dm.side = THREE.DoubleSide; add(new SphG(.42, 24, 10, 0, PIE * 2, 0, PIE / 2.4), dm, 0, .8, 0, PIE - .4, 0, 0); add(new SphG(.04, 8, 8), M(GOLD, .9, .3), 0, .72, .12); } },
+  { id: 'arm', kind: 'arm', name: 'Robotic arm elbow joint', gen: 'Arm joint', home: V(1.1, -.05, .3), dir: V(1, .1, .6).normalize(), fault: 'Encoder fault: position feedback lost',
+    build(add, M) { add(new BoxG(.26, .34, .04), M(0x8a949e, .8, .35), -.02, 0, -.12); add(new SphG(.1, 10, 10), M(0x9aa4ad, .8, .3), 0, 0, 0); add(new CylG(.06, .06, .5, 8), M(GOLD, .8, .35), .28, 0, 0, 0, 0, PIE / 2); add(new SphG(.09, 10, 10), M(0x9aa4ad, .8, .3), .55, 0, 0);
+      add(new BoxG(.07, .045, .05), M(0xe8c11c, .4, .5), .18, .075, 0);
+      add(new CylG(.05, .05, .5, 8), M(GOLD, .8, .35), .78, -.12, 0, 0, 0, PIE / 2 + .5); add(new CylG(.1, .1, .14, 10), M(0x444a52, .6, .4), 1, -.24, 0); add(new CylG(.0, .05, .2, 8), M(0xcfd6dc, .8, .3), 1, -.4, 0); } },
+  wheelDef('w1', 'front right', 1, 1), wheelDef('w2', 'mid right', 0, 1), wheelDef('w3', 'rear right', -1, 1),
+  wheelDef('w4', 'front left', 1, -1), wheelDef('w5', 'mid left', 0, -1), wheelDef('w6', 'rear left', -1, -1)
+];
+const lname = d => d.gen || d.name;
+
+function builder(g, mats, ghost) {
+  const M = (c, m = .5, r = .5, e = 0, flat = false) => {
+    const mt = ghost ? new THREE.MeshBasicMaterial({ color: 0x5dff9e, wireframe: true, transparent: true, opacity: .55 })
+      : new THREE.MeshStandardMaterial({ color: c, metalness: m, roughness: r, emissive: e, flatShading: flat });
+    mats.push(mt); return mt;
+  };
+  const add = (geo, mt, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, ghost && !mt.wireframe ? M() : mt); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; };
+  return { add, M };
+}
+function makePart(def, style) {
+  const g = new THREE.Group(), mats = [], b = builder(g, mats, style === 'ghost');
+  def.build(b.add, b.M);
+  const p = { g, mats, def, state: 'ok', scanned: false, fixed: false, led: g.children.find(m => m.userData.led) };
+  g.children.forEach(m => m.userData.part = p);
+  return p;
+}
+const meshesOf = part => part.g.children.filter(m => m.isMesh && !m.userData.dust);
+
+/* ================= repair recipes =================
+   Each faulty part kind has its own bench layout and an ordered list of repair steps.
+   Coordinates are in the part's own space (the same space its build() uses). */
+const W_RED = '#e0412f', W_BLK = '#3a3f47', W_YEL = '#f0c419';
+const RECIPES = {
+  wheel: { scale: 3.5, rot: [-.18, .5, 0], pos: [-.5, 0],
+    mount(add, M) {
+      add(new CylG(.2, .2, .04, 24), M(0x9aa4ad, .85, .3), 0, 0, 0, PIE / 2, 0, 0);
+      for (const [x, y] of [[.13, 0], [0, .13], [-.13, 0], [0, -.13]]) add(new CylG(.02, .02, .05, 8), M(0x15171a, .5, .6), x, y, .01, PIE / 2, 0, 0);
+      add(new CylG(.07, .07, .5, 12), M(0x777d84, .8, .4), 0, 0, -.3, PIE / 2, 0, 0);
+      add(new BoxG(.1, .8, .1), M(0xb9b9b9, .8, .4), 0, .38, -.55); add(new BoxG(.9, .1, .1), M(0xb9b9b9, .8, .4), .3, .78, -.55); },
+    damage(add, M) { for (const a of [.5, 2.3, 4.4]) add(new BoxG(.07, .025, .22), M(0x3a0d08, .2, .9), Math.cos(a) * .332, Math.sin(a) * .332, .02, 0, 0, a + PIE / 2); },
+    bolts: [[.13, 0], [0, .13], [-.13, 0], [0, -.13]].map(([x, y]) => ({ p: V(x, y, .15), a: V(0, 0, 1) })),
+    steps: [
+      { t: 'unbolt', text: 'Undo the 4 lug bolts holding the broken wheel' },
+      { t: 'remove', text: 'Pull the broken wheel off the hub and drop it in the scrap bin' },
+      { t: 'fit', text: 'Take the replacement wheel from the spares rack and fit it onto the hub' },
+      { t: 'bolt', text: 'Screw the 4 lug bolts back in' }] },
+  power: { scale: 4.0, rot: [.85, -.35, 0], pos: [-.3, -.25],
+    mount(add, M) {
+      add(new BoxG(.62, .03, .52), M(0x5f6a75, .8, .4), 0, -.085, 0);
+      for (const z of [-1, 1]) add(new BoxG(.62, .1, .025), M(0x5f6a75, .8, .4), 0, -.03, z * .26);
+      for (const x of [-1, 1]) add(new BoxG(.025, .1, .52), M(0x5f6a75, .8, .4), x * .31, -.03, 0);
+      add(new BoxG(.44, .1, .08), M(0x25282d, .5, .6), 0, -.02, -.34); },
+    wires: [
+      { c: W_RED, lab: '+', name: 'red power cable', term: 'the + terminal', from: V(-.14, .03, -.3), to: V(-.15, .13, .1) },
+      { c: W_BLK, lab: '−', name: 'black ground cable', term: 'the − terminal', from: V(0, .03, -.3), to: V(0, .13, .1) },
+      { c: W_YEL, lab: 'S', name: 'yellow sense cable', term: 'the S terminal', from: V(.14, .03, -.3), to: V(.15, .13, .1) }],
+    steps: [
+      { t: 'unplug', text: 'Disconnect the 3 cables from the dead battery' },
+      { t: 'remove', text: 'Lift the dead battery out of its bay and drop it in the scrap bin' },
+      { t: 'fit', text: 'Choose the new battery module and set it into the bay' },
+      { t: 'plug', text: 'Reconnect each cable: red to +, black to −, yellow to S' }] },
+  solar: { scale: 1.5, rot: [1.1, 0, 0], pos: [0, .25], noPulse: true,
+    mount(add, M) { add(new BoxG(1.7, .3, 1.15), M(0x8f8a80, .5, .55), -.05, -.17, 0); add(new BoxG(1.74, .05, 1.2), M(GOLD, .9, .3), -.05, -.33, 0); add(new BoxG(.8, .05, .5), M(0x394859, .5, .5), .2, .005, 0); },
+    dust: [{ at: [0, .02, -.95], size: [1.5, .62], rot: [-PIE / 2, 0, 0] }, { at: [0, .02, .95], size: [1.5, .62], rot: [-PIE / 2, 0, 0] }],
+    steps: [{ t: 'wipe', text: 'Wipe the dust off both solar wings', goal: .88, gauge: p => 'Power output ' + Math.round(23 + 77 * p) + '%' }] },
+  mast: { scale: 2.0, rot: [.12, -.4, 0], pos: [0, -1.45], noPulse: true,
+    dust: [{ at: [0, 1.04, .14], size: [.62, .44], rot: [0, 0, 0], blob: true }],
+    steps: [
+      { t: 'wipe', short: 'Clean the pan joint', text: 'Brush the dust out of the pan joint', goal: .85, gauge: p => 'Joint clear ' + Math.round(100 * p) + '%' },
+      { t: 'spin', text: 'Turn the camera head to check the pan axis moves freely', need: 4 }] },
+  dish: { scale: 2.3, rot: [.2, 0, 0], pos: [-.6, -1.75], extra: dishExtra,
+    steps: [{ t: 'tune', text: 'Turn the drive knob until the antenna beam locks onto Earth' }] },
+  navcam: { scale: 3.4, rot: [.15, -PIE / 2 + .3, 0], pos: [-.3, 0], boltR: .03,
+    mount(add, M) { add(new BoxG(.05, .24, .72), M(0x8a949e, .8, .4), -.08, 0, 0); add(new BoxG(.06, .9, .06), M(0xb9b9b9, .8, .4), -.12, -.55, 0); },
+    bolts: [-.27, .27].map(z => ({ p: V(.055, 0, z), a: V(1, 0, 0) })),
+    steps: [
+      { t: 'unbolt', text: 'Undo the 2 bolts holding the camera to its bracket' },
+      { t: 'remove', text: 'Pull the faulty camera off and drop it in the scrap bin' },
+      { t: 'fit', text: 'Fit the replacement navigation camera onto the bracket' },
+      { t: 'bolt', text: 'Bolt the new camera down' }] },
+  arm: { scale: 2.0, rot: [.2, -.35, 0], pos: [-1.0, .3], boltR: .03,
+    mount(add, M) { add(new BoxG(.7, .8, .06), M(0xd8d2c6, .5, .45), -.1, 0, -.17); add(new BoxG(.3, .08, .05), M(0x25282d, .5, .6), -.3, .3, -.13); },
+    bolts: [.135, -.135].map(y => ({ p: V(-.02, y, -.098), a: V(0, 0, 1) })),
+    wires: [{ c: W_YEL, lab: 'ENC', name: 'encoder cable', term: 'the encoder socket', from: V(-.3, .3, -.1), to: V(.18, .1, 0) }],
+    steps: [
+      { t: 'unplug', text: 'Unplug the encoder cable from the joint' },
+      { t: 'unbolt', text: 'Undo the 2 shoulder bolts' },
+      { t: 'remove', text: 'Pull the faulty joint off and drop it in the scrap bin' },
+      { t: 'fit', text: 'Fit the replacement arm joint' },
+      { t: 'bolt', text: 'Bolt the new joint on' },
+      { t: 'plug', text: 'Plug the encoder cable into the new joint' }] },
+};
+const HINTS = {
+  unbolt: ['Pinch a bolt and twist your hand anticlockwise ↺ (let go and re-grip like a wrench), or circle the bolt with a fingertip', 'Circle each bolt anticlockwise ↺ with the mouse pointer'],
+  bolt: ['Pinch a bolt and twist clockwise ↻, or circle it clockwise with a fingertip', 'Circle each bolt clockwise ↻ with the mouse pointer'],
+  remove: ['Pinch the part, pull it away and drop it in the scrap bin', 'Drag the part into the scrap bin'],
+  fit: ['Pinch the matching spare and bring it onto the green outline. It snaps in when it lines up', 'Drag the matching spare onto the green outline'],
+  unplug: ['Pinch a plug and pull it off its terminal', 'Drag each plug off its terminal'],
+  plug: ['Pinch a plug and drop it on the terminal with the same colour and label', 'Drag each plug to the terminal with the same colour and label'],
+  wipe: ['Open your hand and rub back and forth over the dust', 'Hold the mouse button and scrub back and forth over the dust'],
+  tune: ['Pinch the knob and twist, or circle it with a fingertip. Line the beam up with Earth', 'Circle the knob with the mouse pointer. Line the beam up with Earth'],
+  spin: ['Pinch the camera head and twist, or circle it with a fingertip', 'Circle the camera head with the mouse pointer'],
+};
+
+/* ================= state ================= */
+let renderer, scene, cam, keyLight, dust, rover = null, bscene, bcam, B = null, glEl;
+const HOME = V(0, 0, 6);
+const G = { mode: 'main', locked: false, auto: true, still: 0, travel: 0, armed: false, sig: null, tg: null, level: 1, env: 'MARS', thermal: false, quality: 1, muted: false, swap: false, lock: false,
+  toast: '', toastT: 0, fx: [], mistakes: 0, hints: 0, hintT: -9999, black: 0, mouseOnly: false, mpitch: .35 };
+const Z = { ph: null, t0: 0, p: null, wp: null, tgt: null, done: false };
+const mkTS = () => ({ pinch: false, pc: 0, riseT: -1e9, g: null, t: 0, fired: false, hover: null, hoverT: 0, hoverQ: null, lastKey: null,
+  tk: null, tm: null, ta: 0, drag: null, dz: 0, doff: null, wl: [], backT: 0, lostT: 0, lostFired: false, lx: 0, ly: 0 });
+const TS = [mkTS(), mkTS(), mkTS()];   // two hands + mouse
+const MS = { x: -1, y: -1, down: false, t: -1e9, rot: false };
+const isHover = p => TS.some(s => s.hover === p);
+const videoEl = document.getElementById('video'), msgEl = document.getElementById('msg');
+const ray = new THREE.Raycaster(), tmpV = new THREE.Vector3(), tmpC = new THREE.Vector3(), ndc = new THREE.Vector2();
+let started = false, latest = null, hands = null, fps = 0, lastT = 0, ac = null, twId = 0;
+const H = [null, null];
+let best = {}; try { best = JSON.parse(localStorage.getItem('roverBest6') || '{}'); } catch (e) {}
+const shuf = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+/* ================= audio ================= */
+function beep(f, dur = .09, type = 'sine', vol = .07, delay = 0) {
+  if (!ac || G.muted) return;
+  const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + delay;
+  o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur);
+}
+const arp = (notes, type = 'triangle') => notes.forEach((f, i) => beep(f, .14, type, .08, i * .09));
+const err = msg => { G.mistakes++; toast(msg); beep(150, .15, 'square'); };
+const toast = t => { G.toast = t; G.toastT = performance.now(); };
+
+/* ================= scenes ================= */
+function initGL() {
+  glEl = document.getElementById('gl');
+  renderer = new THREE.WebGLRenderer({ canvas: glEl, alpha: true, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); renderer.setSize(innerWidth, innerHeight);
+  scene = new THREE.Scene(); cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 50); cam.position.copy(HOME);
+  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x3a2418, .95));
+  keyLight = new THREE.DirectionalLight(0xffd8b0, 1.4); keyLight.position.set(3, 4, 5); scene.add(keyLight);
+  const rim = new THREE.DirectionalLight(0x46d9ff, .6); rim.position.set(-4, 1, -3); scene.add(rim);
+  const pos = new Float32Array(150 * 3); for (let i = 0; i < 450; i++) pos[i] = (Math.random() - .5) * (i % 3 === 0 ? 10 : i % 3 === 1 ? 6 : 4);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  dust = new THREE.Points(geo, new THREE.PointsMaterial({ size: .035, color: 0xe0a67a, transparent: true, opacity: .55, depthWrite: false })); scene.add(dust);
+  // repair bay: its own scene and camera, nothing in it but the part being fixed
+  bscene = new THREE.Scene(); bcam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 50); bcam.position.copy(HOME); bcam.updateMatrixWorld();
+  bscene.add(new THREE.HemisphereLight(0xe8f4ff, 0x302418, 1.0));
+  const bk = new THREE.DirectionalLight(0xffffff, 1.25); bk.position.set(2, 3, 5); bscene.add(bk);
+  const br = new THREE.DirectionalLight(0x46d9ff, .5); br.position.set(-4, 1, -2); bscene.add(br);
+}
+function setEnv(e) {
+  G.env = e; const mars = e === 'MARS';
+  videoEl.style.filter = mars ? 'brightness(.55) sepia(.5) hue-rotate(-20deg) saturate(1.3)' : 'brightness(.5) saturate(.7) hue-rotate(185deg)';
+  keyLight.color.setHex(mars ? 0xffd8b0 : 0xdbe9ff); dust.material.color.setHex(mars ? 0xe0a67a : 0xcfe8ff); dust.material.opacity = mars ? .55 : .25;
+}
+function buildRover() {
+  if (B) { bscene.remove(B.root); B = null; }
+  G.mode = 'main'; Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0); videoEl.style.opacity = ''; glEl.style.background = '';
+  if (rover) scene.remove(rover.g);
+  TS.forEach(t => Object.assign(t, mkTS())); G.locked = false; G.armed = false; G.travel = 0; G.still = 0; G.tg = null; G.sig = null; G.mistakes = 0; G.hints = 0;
+  const g = new THREE.Group(); g.rotation.order = 'ZXY'; scene.add(g);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.45, 1.52, 64), new THREE.MeshBasicMaterial({ color: 0x46d9ff, transparent: true, opacity: .45, side: THREE.DoubleSide }));
+  const ring2 = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.13, 6), ring.material);
+  for (const r of [ring, ring2]) { r.rotation.x = -PIE / 2; r.position.y = -.8; g.add(r); }
+  const parts = DEFS.map(def => { const p = makePart(def, 'normal'); g.add(p.g); return p; });
+  // one fault per kind so a level is not all wheels
+  const byKind = {}; parts.filter(p => p.def.fault).forEach(p => (byKind[p.def.kind] = byKind[p.def.kind] || []).push(p));
+  const faults = shuf(Object.keys(byKind)).slice(0, Math.min(1 + G.level, 4)).map(k => byKind[k][Math.random() * byKind[k].length | 0]);
+  faults.forEach(p => p.state = 'fault');
+  rover = { g, rings: [ring, ring2], parts, faults, ex: 0, s: 1, yaw: 0, roll: 0, pitch: .35, t0: performance.now(), end: 0, stars: 0, testT: 0 };
+}
+const socketLocal = p => p.def.home.clone().addScaledVector(p.def.dir, rover.ex * 1.5);
+
+/* ================= MediaPipe / start ================= */
+function initHands() {
+  hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: .55, minTrackingConfidence: .6 });
+  hands.onResults(r => { latest = r.multiHandLandmarks || []; });
+}
+async function start() {
+  document.getElementById('start').disabled = true; msgEl.textContent = 'Requesting camera access…';
+  try {
+    videoEl.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, frameRate: { ideal: 30 }, facingMode: 'user' }, audio: false });
+    await videoEl.play(); initHands(); msgEl.textContent = 'Loading hand model…';
+    ac = new (window.AudioContext || window.webkitAudioContext)(); let busy = false;
+    const pump = async () => {
+      if (videoEl.readyState >= 2 && !busy) { busy = true; try { await hands.send({ image: videoEl }); } catch (e) { console.error(e); } busy = false; }
+      if (videoEl.requestVideoFrameCallback) videoEl.requestVideoFrameCallback(pump); else requestAnimationFrame(pump);
+    };
+    pump(); G.mouseOnly = false; started = true; buildRover(); document.getElementById('overlay').style.display = 'none';
+  } catch (e) {
+    console.error(e);
+    msgEl.textContent = e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow it in the address bar, or try with the mouse.' : 'Could not start the camera or load the model. Check the connection and camera, or try with the mouse.';
+    document.getElementById('start').disabled = false;
+  }
+}
+function startMouse() {
+  try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  G.mouseOnly = true; started = true; buildRover(); document.getElementById('overlay').style.display = 'none';
+}
+document.getElementById('start').addEventListener('click', start);
+document.getElementById('mouse').addEventListener('click', startMouse);
+function nextLevel() { if (rover.end) { G.level++; buildRover(); arp([392, 523]); } }
+function hint() { G.hintT = performance.now(); G.hints++; err('Hint used (+1 error)'); }
+addEventListener('keydown', e => {
+  if (!started) return; const k = e.key.toLowerCase();
+  if (G.mode === 'bench') { if (k === 'escape' || k === 'b') exitBench(false); else if (k === 's') { G.muted = !G.muted; toast('Sound ' + (G.muted ? 'off' : 'on')); } return; }
+  if (Z.ph) return;
+  if (k === 'r') buildRover(); else if (k === ' ') { e.preventDefault(); nextLevel(); }
+  else if (k === 't') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); }
+  else if (k === 'm') setEnv(G.env === 'MARS' ? 'ORBIT' : 'MARS');
+  else if (k === 's') { G.muted = !G.muted; toast('Sound ' + (G.muted ? 'off' : 'on')); }
+  else if (k === 'e') { G.lock = !G.lock; toast('Exploded view ' + (G.lock ? 'locked open' : 'follows your hand')); }
+  else if (k === 'h') { G.swap = !G.swap; toast(G.swap ? 'Holding with right-on-screen hand' : 'Holding with left-on-screen hand'); }
+  else if (k === 'f') hint(); else if (k === 'l') setLock(!G.locked); else if (k === 'a') { G.auto = !G.auto; toast('Auto-lock ' + (G.auto ? 'on' : 'off')); }
+  else if (k === 'q' && hands) { G.quality = 1 - G.quality; hands.setOptions({ modelComplexity: G.quality }); toast(G.quality ? 'Tracking: accurate (slower)' : 'Tracking: fast'); }
+});
+/* mouse: a fallback pointer, and the whole input when there is no camera */
+addEventListener('pointermove', e => {
+  if (!started) return; const dx = e.clientX - MS.x, dy = e.clientY - MS.y; MS.x = e.clientX; MS.y = e.clientY; MS.t = performance.now();
+  if (MS.down && MS.rot && G.mode === 'main' && !Z.ph && rover && !G.locked) { rover.yaw += dx * .01; G.mpitch = clamp(G.mpitch + dy * .006, -.9, 1.1); }
+});
+addEventListener('pointerdown', e => {
+  if (!started || e.button !== 0 || !rover) return; const now = performance.now();
+  MS.x = e.clientX; MS.y = e.clientY; MS.down = true; MS.t = now; MS.rot = false; TS[2].riseT = now;
+  if (G.mode === 'bench') { if (inBtn(MS.x, MS.y, innerWidth)) exitBench(false, now); return; }
+  if (Z.ph) return;
+  if (inBtn(MS.x, MS.y, innerWidth)) { setLock(!G.locked); return; }
+  const m = pickMesh(MS.x, MS.y, innerWidth, innerHeight, liveParts(), 6);
+  if (m && !rover.testT) { const p = m.userData.part; scanPart(p); if (p.state === 'fault') enterBench(p); } else MS.rot = true;
+});
+addEventListener('pointerup', () => { MS.down = false; MS.rot = false; });
+const mouseLive = now => G.mouseOnly || now - MS.t < 4000 || MS.down;
+
+/* ================= helpers ================= */
+const dd = (a, b) => Math.hypot(a.x - b.x, a.y - b.y), clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const inBtn = (x, y, w) => x > w - 156 && x < w - 16 && y > 16 && y < 60;
+function coverFit(w, h) { const vw = videoEl.videoWidth || 16, vh = videoEl.videoHeight || 9, s = Math.max(w / vw, h / vh); return { dw: vw * s, dh: vh * s, ox: (w - vw * s) / 2, oy: (h - vh * s) / 2 }; }
+function toScreen(l, fit, w, prev) {
+  const o = prev && prev.length === 21 ? prev : Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0, fresh: true }));
+  for (let i = 0; i < 21; i++) {
+    const tx = w - (fit.ox + l[i].x * fit.dw), ty = fit.oy + l[i].y * fit.dh, p = o[i];
+    if (p.fresh) { p.x = tx; p.y = ty; p.z = l[i].z; p.fresh = false; }
+    else { const a = clamp(.3 + Math.hypot(tx - p.x, ty - p.y) / 40, .3, .95); p.x += (tx - p.x) * a; p.y += (ty - p.y) * a; p.z += (l[i].z - p.z) * .4; }
+  }
+  return o;
+}
+const palm = p => ({ x: (p[0].x + p[5].x + p[9].x + p[13].x + p[17].x) / 5, y: (p[0].y + p[5].y + p[9].y + p[13].y + p[17].y) / 5 });
+function setRay(x, y, w, h, c = cam) { ndc.set(x / w * 2 - 1, -(y / h) * 2 + 1); ray.setFromCamera(ndc, c); }
+const proj = (v, c = bcam) => { const p = tmpC.copy(v).project(c); return { x: (p.x + 1) / 2 * width, y: (1 - p.y) / 2 * height }; };
+function planePoint(x, y, z, w, h) { setRay(x, y, w, h, bcam); const o = ray.ray.origin, d = ray.ray.direction; return new THREE.Vector3().copy(o).addScaledVector(d, (z - o.z) / d.z); }
+const liveParts = () => rover.parts.filter(p => p.state === 'ok' || p.state === 'fault' || p.state === 'repaired');
+function pickAt(x, y, w, h, meshes, r, c = cam) {
+  const o = [[0, 0]]; if (r) for (const rr of [r * .5, r]) for (let a = 0; a < 8; a++) o.push([Math.cos(a * PIE / 4) * rr, Math.sin(a * PIE / 4) * rr]);
+  for (const [ox, oy] of o) { setRay(x + ox, y + oy, w, h, c); const hit = ray.intersectObjects(meshes, false)[0]; if (hit) return hit.object; } return null;
+}
+function pickMesh(x, y, w, h, list, r = 0) { const meshes = []; for (const p of list) for (const m of p.g.children) meshes.push(m); return pickAt(x, y, w, h, meshes, r); }
+function readHand(p) {
+  const sz = dd(p[0], p[9]) || 1, L = i => dd(p[i], p[0]), cur = (t, i) => L(t) < L(i), ext = (t, i) => L(t) > L(i) * 1.15;
+  const rest = cur(16, 14) && cur(20, 18), idx = ext(8, 6);
+  let g = null;
+  if (rest && cur(8, 6) && cur(12, 10) && p[4].y < p[3].y - .15 * sz && p[4].y < p[0].y - .6 * sz) g = 'thumb';
+  else if (rest && cur(8, 6) && cur(12, 10) && dd(p[4], p[12]) < sz * .9) g = 'fist';
+  else if (rest && idx && ext(12, 10)) g = 'v';
+  return { sz, idx, spread: dd(p[4], p[20]) / sz, pinchD: dd(p[4], p[8]) / sz, point: rest && cur(12, 10) && idx, g, pp: { x: (p[4].x + p[8].x) / 2, y: (p[4].y + p[8].y) / 2 } };
+}
+function updPinch(S, T, now) {
+  const was = S.pinch, raw = T.g === 'fist' ? false : was ? T.pinchD < .62 : T.pinchD < .46;
+  S.pc = raw ? 0 : S.pc + 1; S.pinch = raw || (was && S.pc < 3); if (S.pinch && !was) S.riseT = now;
+}
+
+/* ================= p5 loop ================= */
+function setup() { pixelDensity(1); createCanvas(innerWidth, innerHeight); frameRate(60); initGL(); }
+function windowResized() {
+  resizeCanvas(innerWidth, innerHeight); renderer.setSize(innerWidth, innerHeight);
+  for (const c of [cam, bcam]) { c.aspect = innerWidth / innerHeight; c.updateProjectionMatrix(); } bcam.updateMatrixWorld(); layoutBench(B);
+}
+
+function draw() {
+  const ctx = drawingContext, w = width, h = height, now = performance.now(), dt = Math.min(.05, (now - lastT) / 1000 || .016);
+  fps += ((1 / Math.max(.001, dt)) - fps) * .08; lastT = now; clear(); G.black = 0;
+  if (!rover) return;
+  const fit = coverFit(w, h); let n = 0;
+  if (latest && latest.length) {
+    const hh = latest.slice(0, 2).map(l => ({ l, sx: w - (fit.ox + l[0].x * fit.dw) })).sort((a, b) => a.sx - b.sx);
+    if (hh.length === 2) { H[0] = toScreen(hh[0].l, fit, w, H[0]); H[1] = toScreen(hh[1].l, fit, w, H[1]); n = 2; }
+    else { const s = hh[0].sx < w / 2 ? 0 : 1; H[s] = toScreen(hh[0].l, fit, w, H[s]); H[1 - s] = null; n = 1; }
+  } else H[0] = H[1] = null;
+  const hi = n === 2 ? (G.swap ? 1 : 0) : (H[0] ? 0 : H[1] ? 1 : -1), ti = n === 2 ? 1 - hi : -1;
+  const hv = [H[0] ? readHand(H[0]) : null, H[1] ? readHand(H[1]) : null];
+
+  if (G.mode === 'bench') updateBench(dt, now, w, h, hv);
+  if (G.mode === 'bench') {
+    renderer.render(bscene, bcam);
+    for (let s = 0; s < 2; s++) if (H[s]) skeleton(ctx, H[s], hv[s], 1, now, TS[s]);
+    benchHud(ctx, w, h, now);
+    G.black = Math.max(0, 1 - (now - B.openT) / 350);
+  } else {
+    if (!Z.ph) updatePose(dt, w, h, hi, hv);
+    updateParts(dt, now);
+    const dp = dust.geometry.attributes.position.array;
+    for (let i = 0; i < 150; i++) { dp[i * 3 + 1] += dt * .12; dp[i * 3] += dt * .05; if (dp[i * 3 + 1] > 3) dp[i * 3 + 1] = -3; if (dp[i * 3] > 5) dp[i * 3] = -5; }
+    dust.geometry.attributes.position.needsUpdate = true;
+    scene.updateMatrixWorld(true);
+    if (Z.ph) zoomStep(now);
+    else {
+      for (let i = 0; i < 2; i++) interact(TS[i], (G.locked ? H[i] : i === ti) ? hv[i] : null, H[i], w, h, now, dt);
+      if (mouseLive(now) && !MS.rot && G.mode === 'main') scanAt(TS[2], { x: MS.x, y: MS.y }, w, h, now, dt, false); else { TS[2].hover = null; TS[2].hoverQ = null; }
+    }
+    renderer.render(scene, cam);
+    for (let s = 0; s < 2; s++) if (H[s]) skeleton(ctx, H[s], hv[s], G.locked ? 1 : s === hi ? 0 : 1, now, TS[s]);
+    hud(ctx, w, h, n, now);
+  }
+  if (G.black > .002) { ctx.fillStyle = 'rgba(3,5,9,' + G.black.toFixed(3) + ')'; ctx.fillRect(0, 0, w, h); }
+}
+
+/* ---- pose: the holding hand carries the rover ---- */
+function setLock(v) {
+  if (G.locked === v) return; G.locked = v; G.still = 0; G.travel = 0; G.armed = false; G.sig = null;
+  toast(v ? 'Rover locked: scan it with both hands' : 'Rover unlocked: hold it with one hand'); arp(v ? [660, 880] : [880, 660]);
+}
+function updatePose(dt, w, h, hi, hv) {
+  const testing = rover.testT && !rover.end, ek = f => 1 - Math.exp(-dt * f);
+  if (!G.locked) {
+    let cx = w / 2, cy = h * .45, roll = 0, pitch = .35, ex = 0, s = .55, yt = rover.yaw;
+    if (hi >= 0) {
+      const p = H[hi], c = palm(p), k = hv[hi], zr = p[17].x > p[5].x ? p[17].z : p[5].z, zl = p[17].x > p[5].x ? p[5].z : p[17].z;
+      cx = c.x; cy = c.y - k.sz * 1.15; s = clamp(k.sz / h * 3.2, .36, .8);
+      roll = clamp(-(Math.atan2(p[9].y - p[0].y, p[9].x - p[0].x) + PIE / 2), -1.3, 1.3);
+      yt = clamp(-(zr - zl) * 7, -1.3, 1.3); pitch = clamp(.35 + (p[9].z - p[0].z) * 6, -.9, 1.1);
+      ex = G.lock ? 1 : clamp((k.spread - 1.25) / .5, 0, 1);
+      const sig = [c.x / k.sz, c.y / k.sz, roll * 2, pitch * 2, yt * 2, ex * 2];
+      if (G.sig) { const d = Math.hypot(...sig.map((v, i) => v - G.sig[i])); G.travel += d; G.still = d < .04 ? G.still + dt : 0; if (G.travel > 1.5) G.armed = true; }
+      G.sig = sig; if (G.auto && G.armed && G.still > .8) setLock(true);
+    } else {
+      G.sig = null; G.still = 0;
+      if (performance.now() - MS.t > 3000 && !TS[2].hover) rover.yaw += dt * .4;
+      yt = rover.yaw; pitch = G.mpitch; ex = G.lock ? 1 : 0;
+    }
+    G.tg = { cx, cy, roll, pitch, ex, s, yt };
+  }
+  const T = G.tg || { cx: w / 2, cy: h * .45, roll: 0, pitch: .35, ex: 0, s: .55, yt: 0 }, ex = testing ? 0 : T.ex;
+  tmpV.set(T.cx / w * 2 - 1, -(T.cy / h) * 2 + 1, .5).unproject(cam).sub(cam.position).normalize().multiplyScalar(6).add(cam.position);
+  rover.g.position.lerp(tmpV, ek(16)); rover.yaw += (T.yt - rover.yaw) * ek(10);
+  rover.roll += (T.roll - rover.roll) * ek(12); rover.pitch += (T.pitch - rover.pitch) * ek(10); rover.ex += (ex - rover.ex) * ek(8); rover.s += (T.s - rover.s) * ek(10);
+  rover.g.rotation.set(rover.pitch, rover.yaw, rover.roll); rover.g.scale.setScalar(rover.s);
+}
+
+/* ---- parts: explode, live behaviour, emissive feedback ---- */
+function updateParts(dt, now) {
+  const t = now / 1000, pulse = .3 + .3 * Math.sin(t * 6), hintOn = now - G.hintT < 2500, testing = rover.testT && !rover.end;
+  rover.rings[1].rotation.z += dt * .6; rover.rings[0].material.color.setHex(G.locked ? 0x5dff9e : 0x46d9ff);
+  for (const p of rover.parts) {
+    const k = p.def.kind;
+    p.g.position.copy(socketLocal(p)); p.g.rotation.set(0, 0, 0);
+    if (p.state === 'fault') p.g.rotation.z = Math.sin(t * 35 + p.def.home.x * 7) * .035 * (1 - rover.ex);       // faulty parts shudder
+    else if (testing) { if (k === 'wheel') p.g.rotation.z = -t * 10; else if (k === 'mast') p.g.rotation.y = Math.sin(t * 3) * .8; else if (k === 'dish') p.g.rotation.y = t * 3; else if (k === 'arm') p.g.rotation.z = Math.sin(t * 3) * .25; }
+    else if (k === 'mast') p.g.rotation.y = Math.sin(t * .8) * .35;
+    if (p.led) p.led.material.color.setHex(rover.faults.every(f => f.fixed) ? 0x30ff80 : (Math.sin(t * 5) > 0 ? 0xff3030 : 0x501010));
+    let r = 0, g = 0, b = 0;
+    if (G.thermal) { if (p.state === 'fault') { r = .9 * (.6 + pulse); g = .3; } else { b = .3; g = .08; } }
+    else if (p.state === 'fault' && p.scanned) r = pulse;
+    if (hintOn && p.state === 'fault') { r = g = b = .6 * (.5 + pulse); }
+    if (isHover(p)) { g += .3; b += .4; }
+    for (const m of p.mats) if (m.emissive) m.emissive.setRGB(r, g, b);
+  }
+  if (testing && now - rover.testT > 3200) { rover.parts.forEach(p => p.g.rotation.set(0, 0, 0)); finish(now); }
+}
+function finish(now) {
+  rover.end = now; const secs = (now - rover.t0) / 1000, par = rover.faults.length * 90;
+  rover.stars = secs < par && G.mistakes <= 1 ? 3 : secs < par * 2 && G.mistakes <= 3 ? 2 : 1;
+  const key = 'L' + Math.min(1 + G.level, 4); rover.newBest = !best[key] || secs < best[key];
+  if (rover.newBest) { best[key] = secs; try { localStorage.setItem('roverBest6', JSON.stringify(best)); } catch (e) {} }
+  arp([523, 659, 784, 1047]);
+}
+function fx(wp) { const v = wp.clone().project(cam); G.fx.push({ x: (v.x + 1) / 2 * width, y: (1 - v.y) / 2 * height, t: performance.now() }); }
+
+/* ---- scanning on the rover (tool hand or mouse) ---- */
+function scanPart(p) {
+  if (p.scanned) return; p.scanned = true;
+  if (p.state === 'fault') { toast('Anomaly: ' + p.def.fault); beep(200, .12, 'square'); beep(200, .12, 'square', .07, .16); }
+  else { toast(lname(p.def) + ': nominal'); beep(880, .08); }
+}
+function scanAt(S, q, w, h, now, dt, allowBtn) {
+  S.hover = null; S.hoverQ = null; let key = null;
+  if (q && !rover.end && !rover.testT) {
+    if (inBtn(q.x, q.y, w)) { if (allowBtn) key = 'lock'; }
+    else { const m = pickMesh(q.x, q.y, w, h, liveParts(), 18); if (m) { S.hover = m.userData.part; key = S.hover; } }
+    if (key) S.hoverQ = { x: q.x, y: q.y };
+  }
+  if (key) {
+    S.hoverT = key === S.lastKey ? S.hoverT + dt : 0;
+    if (key === 'lock') { if (S.hoverT > .6) { setLock(!G.locked); S.hoverT = -2; } }
+    else if (S.hoverT > .45) { const p = S.hover; scanPart(p); if (p.state === 'fault') { enterBench(p); S.hoverT = 0; } }
+  } else S.hoverT = 0;
+  S.lastKey = key;
+}
+function interact(S, T, P, w, h, now, dt) {
+  if (!T) { S.g = null; S.hoverT = 0; S.lastKey = null; S.hover = null; S.hoverQ = null; S.pinch = false; return; }
+  updPinch(S, T, now);
+  if (T.g !== S.g) { S.g = T.g; S.t = now; S.fired = false; }
+  if (T.g && !S.fired && now - S.t >= (T.g === 'v' ? 900 : 1000)) {
+    S.fired = true;
+    if (T.g === 'v') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); beep(660, .1); } else if (T.g === 'fist') hint(); else nextLevel();
+  }
+  scanAt(S, T.point ? P[8] : null, w, h, now, dt, true);
+}
+
+/* ================= zoom transition ================= */
+function enterBench(p) {
+  if (Z.ph || G.mode === 'bench') return;
+  const now = performance.now();
+  Z.ph = 'in'; Z.t0 = now; Z.p = p; Z.done = false; Z.wp = p.g.getWorldPosition(new THREE.Vector3());
+  Z.tgt = Z.wp.clone().add(HOME.clone().sub(Z.wp).normalize().multiplyScalar(1.5));
+  TS.forEach(S => { S.hover = null; S.hoverQ = null; S.hoverT = 0; });
+  beep(300, .3, 'sine', .05); beep(600, .25, 'sine', .05, .12);
+}
+function zoomStep(now) {
+  if (Z.ph === 'in') {
+    const k = clamp((now - Z.t0) / 650, 0, 1), e = k * k * (3 - 2 * k);
+    cam.position.lerpVectors(HOME, Z.tgt, e); cam.lookAt(tmpV.copy(Z.wp).multiplyScalar(e));
+    G.black = clamp((k - .45) / .55, 0, 1);
+    if (k >= 1) openBench(Z.p, now);
+  } else if (Z.ph === 'out') {
+    const k = clamp((now - Z.t0) / 700, 0, 1), e = 1 - Math.pow(1 - k, 3);
+    cam.position.lerpVectors(Z.tgt, HOME, e); cam.lookAt(tmpV.copy(Z.wp).multiplyScalar(1 - e));
+    G.black = 1 - clamp(k / .45, 0, 1);
+    if (k >= 1) {
+      Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0);
+      if (Z.done) { fx(Z.p.g.getWorldPosition(new THREE.Vector3())); if (rover.faults.every(f => f.fixed)) { rover.testT = now; toast('Systems check running…'); } }
+    }
+  }
+}
+function openBench(p, now) {
+  Z.ph = null; cam.position.copy(HOME); cam.lookAt(0, 0, 0);
+  B = p.bench || (p.bench = makeBench(p, now)); bscene.add(B.root); layoutBench(B); B.openT = now; G.mode = 'bench';
+  videoEl.style.opacity = '.14'; glEl.style.background = 'radial-gradient(circle at 50% 45%, rgba(28,42,58,.88), rgba(4,6,10,.97) 72%)';
+  TS.forEach(S => { S.drag = null; S.tk = null; S.backT = 0; S.wl = []; });
+}
+function exitBench(done, now = performance.now()) {
+  if (!B) return; const b = B, p = b.p;
+  TS.forEach(S => { S.drag = null; S.tk = null; S.backT = 0; S.wl = []; });
+  if (b.unit && b.unit.g.parent === b.root) { b.unit.held = null; homeTween(b, b.unit.g, b.holder); }
+  b.rack.forEach(it => it.held = null);
+  b.plugs.forEach(pl => { if (pl.state === 'held') pl.state = pl.prev; });
+  bscene.remove(b.root); B = null; G.mode = 'main';
+  videoEl.style.opacity = ''; glEl.style.background = '';
+  if (done) { p.state = 'repaired'; p.fixed = true; p.bench = null; toast('Repaired: ' + p.def.name); arp([523, 659, 784]); }
+  else { toast('Repair paused. Point at the part again to carry on'); beep(700, .18, 'sine', .05); beep(400, .2, 'sine', .05, .1); }
+  Z.ph = 'out'; Z.t0 = now; Z.p = p; Z.done = done; Z.wp = p.g.getWorldPosition(new THREE.Vector3());
+  Z.tgt = Z.wp.clone().add(HOME.clone().sub(Z.wp).normalize().multiplyScalar(1.5));
+  TS.forEach(S => { S.lastKey = p; S.hoverT = -1e9; });   // no instant re-entry while still pointing at it
+}
+
+/* ================= repair bay ================= */
+function makeBench(p, now) {
+  const def = p.def, R = RECIPES[def.kind];
+  const root = new THREE.Group(), holder = new THREE.Group(); root.add(holder);
+  holder.rotation.set(...R.rot);
+  const b = { p, def, R, root, holder, si: -1, tw: [], bolts: [], plugs: [], rack: [], dust: [], done: false, bin: new THREE.Vector3(), S: R.scale, spin: 0, openT: now };
+  if (R.mount) { const mg = new THREE.Group(), bl = builder(mg, [], false); R.mount(bl.add, bl.M); holder.add(mg); }
+  b.unit = makePart(def, 'normal'); b.unit.broken = true; holder.add(b.unit.g);
+  if (R.damage) { const bl = builder(b.unit.g, b.unit.mats, false); R.damage(bl.add, bl.M); b.unit.g.children.forEach(m => m.userData.part = b.unit); }
+  b.ghost = makePart(def, 'ghost'); b.ghost.g.visible = false; holder.add(b.ghost.g);
+  (R.bolts || []).forEach(s => b.bolts.push(makeBolt(b, s, false)));
+  (R.wires || []).forEach((wd, i) => b.plugs.push(Object.assign({}, wd, { i, state: 'on', prev: 'on', x: 0, y: 0 })));
+  (R.dust || []).forEach(d => b.dust.push(makeDust(b, d)));
+  if (R.extra) R.extra(b);
+  b.steps = R.steps.map(s => Object.assign({}, s, { done: false }));
+  layoutBench(b); nextStep(b, now);
+  return b;
+}
+function layoutBench(b) {
+  if (!b) return;
+  const hh = Math.tan(PIE * 25 / 180) * 6, hw = hh * bcam.aspect, f = Math.min(1, bcam.aspect / 1.5);
+  b.S = b.R.scale * f; b.holder.scale.setScalar(b.S); b.holder.position.set(b.R.pos[0] * f, b.R.pos[1] * f, 0);
+  b.bin.set(-hw * .76, -hh * .58, 0);
+  b.rack.forEach((it, i) => it.slot.set(hw * .76, ((b.rack.length - 1) / 2 - i) * 1.35 * Math.max(f, .7) + .15, 0));
+  if (b.knob) b.knob.position.set(hw * .48, -hh * .42, .3);
+}
+function nextStep(b, now) {
+  b.si++; TS.forEach(S => S.tk = null);
+  if (b.si >= b.steps.length) { b.done = true; b.doneT = now; b.unit.broken = false; arp([523, 659, 784, 1047]); return; }
+  const st = b.steps[b.si], fn = STEP[st.t].begin; st.t0 = now; if (fn) fn(b, st, now);
+}
+
+/* ---- objects in the bay ---- */
+function makeBolt(b, spec, raised) {
+  const r = b.R.boltR || .036, g = new THREE.Group(), spin = new THREE.Group(); g.add(spin);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xc9d1d8, metalness: .9, roughness: .28 });
+  const head = new THREE.Mesh(new CylG(r, r, r * .9, 6), mat); head.position.y = r * .55; spin.add(head);
+  const wash = new THREE.Mesh(new CylG(r * 1.4, r * 1.4, r * .2, 18), mat); wash.position.y = r * .1; spin.add(wash);
+  const shaft = new THREE.Mesh(new CylG(r * .5, r * .5, r * 3, 10), new THREE.MeshStandardMaterial({ color: 0x8e979f, metalness: .9, roughness: .4 })); shaft.position.y = -r * 1.5; spin.add(shaft);
+  g.quaternion.setFromUnitVectors(YAX, spec.a);
+  const bo = { g, spin, mat, seat: spec.p.clone(), a: spec.a.clone(), prog: 0, done: false, wrong: 0, wrongT: 0, raised, L: r * 3.2, act: false };
+  poseBolt(bo); b.holder.add(g); return bo;
+}
+function poseBolt(bo) {
+  const lift = bo.raised ? (1 - bo.prog) * bo.L : bo.prog * bo.L;
+  bo.g.position.copy(bo.seat).addScaledVector(bo.a, lift); bo.spin.rotation.y = (bo.raised ? -1 : 1) * bo.prog * 10;
+  if (!bo.done) bo.mat.emissive.setHex(bo.act ? 0x664000 : 0);
+}
+function makeDust(b, d) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = Math.round(256 * d.size[1] / d.size[0]);
+  const c = cv.getContext('2d'), W = cv.width, Hh = cv.height;
+  if (d.blob) {
+    for (let i = 0; i < 26; i++) { const x = W * (.25 + Math.random() * .5), y = Hh * (.25 + Math.random() * .5), r = W * (.08 + Math.random() * .12), g = c.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(170,112,66,.95)'); g.addColorStop(1, 'rgba(170,112,66,0)'); c.fillStyle = g; c.fillRect(x - r, y - r, 2 * r, 2 * r); }
+  } else {
+    c.fillStyle = 'rgba(172,116,70,.94)'; c.fillRect(0, 0, W, Hh);
+    for (let i = 0; i < 14; i++) { c.fillStyle = 'rgba(120,78,46,.35)'; c.fillRect(Math.random() * W, Math.random() * Hh, 20 + Math.random() * 60, 3 + Math.random() * 5); }
+  }
+  for (let i = 0; i < W * Hh / 40; i++) {
+    const x = Math.random() * W, y = Math.random() * Hh; if (d.blob && Math.hypot(x / W - .5, y / Hh - .5) > .3) continue;
+    c.fillStyle = `rgba(${110 + Math.random() * 90 | 0},${70 + Math.random() * 50 | 0},${40 + Math.random() * 30 | 0},${(.3 + Math.random() * .6).toFixed(2)})`; c.fillRect(x, y, 2, 2);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(d.size[0], d.size[1]), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(...d.at); m.rotation.set(...d.rot); m.userData.dust = true; b.unit.g.add(m);
+  const o = { m, cv, c, tex, init: 1 }; o.init = Math.max(1, opaque(o)); return o;
+}
+function opaque(o) { const d = o.c.getImageData(0, 0, o.cv.width, o.cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 16) if (d[i] > 60) n++; return n; }
+function wipeStroke(o, a, bb, r, s) {
+  const c = o.c; c.save(); c.globalCompositeOperation = 'destination-out'; c.strokeStyle = 'rgba(0,0,0,' + s.toFixed(3) + ')'; c.lineWidth = r * 2; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(bb.x + .01, bb.y); c.stroke(); c.restore(); o.tex.needsUpdate = true;
+}
+function dishExtra(b) {
+  // the dish and its feed swing on a gimbal at the top of the mast; the knob drives that gimbal
+  b.b0 = V(0, Math.cos(.4), -Math.sin(.4)); b.dc = V(0, .55, .1); b.pc = V(0, .54, 0);   // boresight, dish centre, gimbal pivot
+  b.root.updateMatrixWorld(true);
+  const piv = new THREE.Group(); piv.position.copy(b.pc); b.unit.g.add(piv); b.unit.g.updateMatrixWorld(true);
+  [b.unit.g.children[2], b.unit.g.children[3]].forEach(m => piv.attach(m)); b.piv = piv;
+  const e = new THREE.Mesh(new SphG(.07, 18, 12), new THREE.MeshStandardMaterial({ color: 0x3b8cff, emissive: 0x0a2a66, roughness: .6 }));
+  e.position.copy(b.dc).addScaledVector(b.b0, 1.15); b.holder.add(e); b.earth = e;
+  const k = new THREE.Group(), sp = new THREE.Group(); k.add(sp);
+  const base = new THREE.Mesh(new CylG(.42, .42, .1, 40), new THREE.MeshStandardMaterial({ color: 0x25282d, metalness: .5, roughness: .6 })); base.rotation.x = PIE / 2; k.add(base);
+  const capM = new THREE.MeshStandardMaterial({ color: 0xaeb7bf, metalness: .85, roughness: .3 });
+  const cap = new THREE.Mesh(new CylG(.32, .34, .18, 32), capM); cap.rotation.x = PIE / 2; cap.position.z = .1; sp.add(cap);
+  for (let i = 0; i < 18; i++) { const a = i / 18 * PIE * 2, r = new THREE.Mesh(new BoxG(.05, .06, .2), capM); r.position.set(Math.cos(a) * .33, Math.sin(a) * .33, .1); r.rotation.z = a; sp.add(r); }
+  const mk = new THREE.Mesh(new BoxG(.05, .2, .03), new THREE.MeshBasicMaterial({ color: 0xffb000 })); mk.position.set(0, .18, .2); sp.add(mk);
+  b.knob = k; b.knobSpin = sp; b.root.add(k);
+  b.e0 = (Math.random() < .5 ? -1 : 1) * (.6 + Math.random() * .5); b.k = 0; b.err = b.e0; b.tick = 0;
+}
+function homeTween(b, g, parent) {
+  if (g.parent !== parent) parent.attach(g);
+  const id = ++twId; g.userData.tw = id;
+  b.tw.push(() => {
+    if (g.userData.tw !== id) return true;
+    g.position.multiplyScalar(.8); g.quaternion.slerp(IDQ, .2); g.scale.setScalar(g.scale.x + (1 - g.scale.x) * .2);
+    if (g.position.length() < .004 && Math.abs(1 - g.scale.x) < .004) { g.position.set(0, 0, 0); g.quaternion.identity(); g.scale.setScalar(1); return true; }
+    return false;
+  });
+}
+function scrapTween(b, g, toBin) {
+  if (g.parent !== b.root) b.root.attach(g);
+  const id = ++twId; g.userData.tw = id; const t0 = performance.now(), from = g.position.clone(), s0 = g.scale.x;
+  b.tw.push(() => {
+    const k = Math.min(1, (performance.now() - t0) / 450);
+    if (toBin) g.position.lerpVectors(from, b.bin, k * k);
+    g.scale.setScalar(s0 * (1 - k)); g.rotation.z += .12;
+    if (k >= 1) { b.root.remove(g); return true; } return false;
+  });
+}
+const fresh = (q, now) => q.pinch && !q.S.drag && now - q.S.riseT < 450;
+
+/* ---- input in the bay: both hands are tools, plus the mouse ---- */
+function benchPointers(hv, now, dt) {
+  const out = [];
+  for (let s = 0; s < 2; s++) {
+    const S = TS[s];
+    if (H[s] && hv[s]) {
+      const P = H[s], T = hv[s]; S.lostT = 0; S.lostFired = false; updPinch(S, T, now);
+      out.push({ id: s, S, x: P[8].x, y: P[8].y, px: T.pp.x, py: T.pp.y, pinch: S.pinch, point: T.idx && !S.pinch,
+        roll: Math.atan2(P[9].y - P[0].y, P[9].x - P[0].x), wipe: S.pinch ? [] : [palm(P), P[8], P[12], P[16]] });
+      S.lx = T.pp.x; S.ly = T.pp.y;
+    } else {
+      S.pinch = false; S.lostT += dt;
+      if (S.lostT > .35 && !S.lostFired) { S.lostFired = true; S.tk = null; out.push({ id: s, S, lost: true, x: S.lx, y: S.ly, px: S.lx, py: S.ly, pinch: false, point: false, roll: null, wipe: [] }); }
+    }
+  }
+  if (mouseLive(now)) out.push({ id: 'm', S: TS[2], x: MS.x, y: MS.y, px: MS.x, py: MS.y, pinch: MS.down, point: true, roll: null, wipe: MS.down ? [{ x: MS.x, y: MS.y }] : [] });
+  return out;
+}
+/* Turning: pinch near the target and twist the hand (wrench grip, roll of the wrist on screen),
+   or point and circle the target with the fingertip / mouse. Positive delta = clockwise on screen. */
+function turnTargets(targets, ptrs, R, apply) {
+  for (const t of targets) if (typeof t.key === 'object') t.key.act = false;
+  targets.act = false;
+  for (const q of ptrs) {
+    const S = q.S; if (q.lost) { S.tk = null; continue; }
+    const wrench = q.pinch && q.roll != null;
+    let t = targets.find(u => u.key === S.tk);
+    if (t) {
+      if (wrench ? S.tm !== 'w' : (S.tm !== 'c' || !q.point || Math.hypot(q.x - t.x, q.y - t.y) > R * 2.6)) { S.tk = null; t = null; }
+    }
+    if (!t) {
+      if (!wrench && !q.point) continue;
+      const cx = wrench ? q.px : q.x, cy = wrench ? q.py : q.y; let bestT = null, bd = R;
+      for (const u of targets) { const d = Math.hypot(cx - u.x, cy - u.y); if (d < bd && !TS.some(o => o !== S && o.tk === u.key)) { bd = d; bestT = u; } }
+      if (bestT) { S.tk = bestT.key; S.tm = wrench ? 'w' : 'c'; S.ta = wrench ? q.roll : Math.atan2(q.y - bestT.y, q.x - bestT.x); if (typeof bestT.key === 'object') bestT.key.act = true; targets.act = true; }
+      continue;
+    }
+    const a = wrench ? q.roll : Math.atan2(q.y - t.y, q.x - t.x);
+    let d = a - S.ta; d = Math.atan2(Math.sin(d), Math.cos(d)); S.ta = a;
+    if (typeof t.key === 'object') t.key.act = true; targets.act = true;
+    if (!wrench && Math.hypot(q.x - t.x, q.y - t.y) < 10) continue;   // too close to the centre to read an angle
+    if (Math.abs(d) < 1) apply(t, d);
+  }
+}
+const NEED = 3.4;   // radians of turning per bolt (a bit over half a turn)
+function boltWork(b, ptrs, dir, now) {
+  const live = b.bolts.filter(bo => !bo.done);
+  const tg = live.map(bo => { const s = proj(bo.g.getWorldPosition(tmpV)); return { key: bo, x: s.x, y: s.y }; });
+  turnTargets(tg, ptrs, 48, (t, d) => {
+    const bo = t.key, good = d * dir;
+    if (good > 0) { const before = bo.prog; bo.prog = Math.min(1, bo.prog + good / NEED); bo.wrong = 0; if ((bo.prog * 8 | 0) !== (before * 8 | 0)) beep(1400, .02, 'square', .025); }
+    else { bo.wrong += -good; if (bo.wrong > .5) { bo.wrongT = now; bo.wrong = 0; } }
+  });
+  for (const bo of live) {
+    poseBolt(bo);
+    if (bo.prog >= 1) {
+      bo.done = true; bo.mat.emissive.setHex(0);
+      if (dir < 0) {   // bolt comes out and drops away
+        beep(520, .1); const g = bo.g, id = ++twId; g.userData.tw = id; let t = 0;
+        b.tw.push(() => { t += .016; g.position.addScaledVector(bo.a, .012); g.scale.setScalar(Math.max(0, 1 - t / .35)); if (t > .35) { b.holder.remove(g); return true; } return false; });
+      } else { bo.mat.color.setHex(0x5dff9e); beep(900, .06); beep(1300, .08, 'sine', .06, .07); }
+    }
+  }
+  return b.bolts.every(bo => bo.done);
+}
+const termPos = (b, pl) => proj(b.holder.localToWorld(tmpV.copy(pl.to)));
+const plugPos = (b, pl) => pl.state === 'on' ? termPos(b, pl) : { x: pl.x, y: pl.y };
+function loosePos(b, pl) {
+  const a = proj(b.holder.localToWorld(tmpV.copy(pl.from))), c = proj(b.holder.getWorldPosition(tmpV));
+  let dx = a.x - c.x, dy = a.y - c.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+  const sp = (pl.i - (b.plugs.length - 1) / 2) * 34;
+  return { x: a.x + dx * 95 - dy * sp, y: a.y + dy * 95 + dx * sp };
+}
+function easeLoose(b) { for (const pl of b.plugs) if (pl.state === 'loose') { const L = loosePos(b, pl); pl.x += (L.x - pl.x) * .2; pl.y += (L.y - pl.y) * .2; } }
+
+const STEP = {
+  unbolt: { short: 'Remove the bolts', update: (b, st, ptrs, dt, now) => boltWork(b, ptrs, -1, now) },
+  bolt: { short: 'Refit and tighten the bolts',
+    begin(b) { b.bolts = b.R.bolts.map(s => makeBolt(b, s, true)); },
+    update: (b, st, ptrs, dt, now) => boltWork(b, ptrs, 1, now) },
+  remove: { short: 'Take out the broken part',
+    update(b, st, ptrs, dt, now, w, h) {
+      const u = b.unit, bin = proj(b.bin);
+      for (const q of ptrs) {
+        const S = q.S;
+        if (S.drag === u) {
+          if (!q.pinch) { S.drag = null; u.held = null; homeTween(b, u.g, b.holder); if (!q.lost) toast('Drop it right into the scrap bin'); continue; }
+          u.g.position.copy(planePoint(q.px, q.py, S.dz, w, h)).add(S.doff);
+          if (Math.hypot(q.px - bin.x, q.py - bin.y) < 85) { S.drag = null; scrapTween(b, u.g, true); b.unit = null; beep(260, .15, 'sawtooth', .05); return true; }
+        } else if (fresh(q, now) && !u.held && pickAt(q.px, q.py, w, h, meshesOf(u), 30, bcam)) {
+          b.root.attach(u.g); u.g.userData.tw = 0; u.held = S; S.drag = u; S.dz = u.g.position.z; S.doff = u.g.position.clone().sub(planePoint(q.px, q.py, S.dz, w, h)); beep(520, .06);
+        }
+      }
+      return false;
+    } },
+  fit: { short: 'Fit the replacement',
+    begin(b) {
+      const kinds = shuf(['wheel', 'power', 'navcam', 'mast', 'dish', 'arm', 'solar'].filter(k => k !== b.def.kind));
+      const defs = shuf([b.def, ...kinds.slice(0, G.level >= 2 ? 2 : 1).map(k => DEFS.find(d => d.kind === k))]);
+      b.rack = defs.map(def => {
+        const sp = makePart(def, 'normal'), box = new THREE.Box3().setFromObject(sp.g), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+        sp.mats.forEach(m => m.emissive && m.emissive.setHex(0x05261a));
+        return { sp, def, correct: def.kind === b.def.kind, rs: 1.0 / Math.max(size.x, size.y, size.z), cy: c.y, slot: new THREE.Vector3(), held: null };
+      });
+      layoutBench(b);
+      b.rack.forEach(it => { it.sp.g.scale.setScalar(it.rs); it.sp.g.position.copy(it.slot); b.root.add(it.sp.g); });
+      b.ghost.g.visible = true;
+    },
+    update(b, st, ptrs, dt, now, w, h) {
+      const sock = proj(b.holder.getWorldPosition(tmpV));
+      for (const it of b.rack) if (!it.held) {
+        const g = it.sp.g; tmpV.copy(it.slot); tmpV.y -= it.cy * g.scale.x; g.position.lerp(tmpV, .18);
+        g.scale.setScalar(g.scale.x + (it.rs - g.scale.x) * .18); g.rotation.y += dt * .7; g.rotation.x *= .9; g.rotation.z *= .9;
+      }
+      for (const q of ptrs) {
+        const S = q.S, it = b.rack.find(r => r === S.drag);
+        if (it) {
+          const g = it.sp.g;
+          if (!q.pinch) {
+            S.drag = null; it.held = null; const p = proj(g.position);
+            if (!it.correct && Math.hypot(p.x - sock.x, p.y - sock.y) < 160) err('Wrong part: a ' + lname(it.def).toLowerCase() + ' does not fit this socket');
+            continue;
+          }
+          S.doff.multiplyScalar(.9); g.position.copy(planePoint(q.px, q.py, S.dz, w, h)).add(S.doff);
+          g.scale.setScalar(g.scale.x + (b.S - g.scale.x) * .12); g.quaternion.slerp(b.holder.quaternion, .12);
+          const p = proj(g.position);
+          if (it.correct && Math.hypot(p.x - sock.x, p.y - sock.y) < 85) {
+            S.drag = null; homeTween(b, g, b.holder); it.sp.mats.forEach(m => m.emissive && m.emissive.setHex(0));
+            b.unit = it.sp; b.unit.broken = false; b.ghost.g.visible = false;
+            b.rack.filter(r => r !== it).forEach(r => scrapTween(b, r.sp.g, false)); b.rack = [];
+            beep(440, .1); beep(660, .12, 'sine', .07, .08); toast('Seated: ' + lname(b.def));
+            return true;
+          }
+        } else if (fresh(q, now)) {
+          for (const r of b.rack) if (!r.held && pickAt(q.px, q.py, w, h, meshesOf(r.sp), 26, bcam)) {
+            r.held = S; S.drag = r; S.dz = r.sp.g.position.z; S.doff = r.sp.g.position.clone().sub(planePoint(q.px, q.py, S.dz, w, h)); beep(520, .06); break;
+          }
+        }
+      }
+      return false;
+    } },
+  unplug: { short: 'Disconnect the cables',
+    update(b, st, ptrs, dt, now) {
+      easeLoose(b);
+      for (const q of ptrs) {
+        const S = q.S, pl = b.plugs.find(p => p === S.drag);
+        if (pl) {
+          if (!q.pinch) { S.drag = null; pl.state = 'on'; continue; }
+          pl.x = q.px; pl.y = q.py; const t = termPos(b, pl);
+          if (Math.hypot(pl.x - t.x, pl.y - t.y) > 75) { pl.state = 'loose'; S.drag = null; beep(380, .08, 'square', .04); }
+        } else if (fresh(q, now)) {
+          const hit = b.plugs.find(p => { if (p.state !== 'on') return false; const t = termPos(b, p); return Math.hypot(q.px - t.x, q.py - t.y) < 40; });
+          if (hit) { const t = termPos(b, hit); hit.x = t.x; hit.y = t.y; hit.prev = 'on'; hit.state = 'held'; S.drag = hit; beep(520, .05); }
+        }
+      }
+      return b.plugs.every(p => p.state === 'loose');
+    } },
+  plug: { short: 'Reconnect the cables',
+    update(b, st, ptrs, dt, now) {
+      easeLoose(b);
+      for (const q of ptrs) {
+        const S = q.S, pl = b.plugs.find(p => p === S.drag);
+        if (pl) {
+          if (!q.pinch) {
+            S.drag = null; pl.state = 'loose';
+            const wrong = b.plugs.find(o => o !== pl && o.state !== 'on' && (() => { const t = termPos(b, o); return Math.hypot(pl.x - t.x, pl.y - t.y) < 45; })());
+            if (wrong) err('Wrong terminal: the ' + pl.name + ' goes to ' + pl.term);
+            continue;
+          }
+          pl.x = q.px; pl.y = q.py; const t = termPos(b, pl);
+          if (Math.hypot(pl.x - t.x, pl.y - t.y) < 38) { pl.state = 'on'; S.drag = null; beep(700, .05); beep(1050, .07, 'sine', .06, .06); }
+        } else if (fresh(q, now)) {
+          const hit = b.plugs.find(p => p.state === 'loose' && Math.hypot(q.px - p.x, q.py - p.y) < 40);
+          if (hit) { hit.prev = 'loose'; hit.state = 'held'; S.drag = hit; beep(520, .05); }
+        }
+      }
+      return b.plugs.every(p => p.state === 'on');
+    } },
+  wipe: { short: 'Clean off the dust',
+    begin(b, st) { st.p = 0; st.ct = 0; },
+    update(b, st, ptrs, dt, now, w, h) {
+      const meshes = b.dust.map(o => o.m);
+      for (const o of b.dust) {   // brush size is set in screen pixels, so convert to texture pixels
+        const hw = o.m.geometry.parameters.width / 2, l = proj(o.m.localToWorld(tmpV.set(-hw, 0, 0))), r = proj(o.m.localToWorld(tmpV.set(hw, 0, 0)));
+        o.k = o.cv.width / Math.max(40, Math.hypot(r.x - l.x, r.y - l.y));
+      }
+      for (const q of ptrs) {
+        const S = q.S; if (!q.wipe.length) { S.wl = []; continue; }
+        q.wipe.forEach((pt, j) => {
+          setRay(pt.x, pt.y, w, h, bcam); const hit = ray.intersectObjects(meshes, false)[0], last = S.wl[j];
+          if (!hit) { S.wl[j] = null; return; }
+          const o = b.dust.find(d => d.m === hit.object), cx = hit.uv.x * o.cv.width, cy = (1 - hit.uv.y) * o.cv.height;
+          if (last && last.o === o && now - last.t < 150) {
+            const sp = Math.hypot(pt.x - last.sx, pt.y - last.sy) / Math.max(now - last.t, 8) * 1000;   // px per second
+            const s = clamp((sp - 40) / 600, 0, .35); if (s > 0) wipeStroke(o, last, { x: cx, y: cy }, (q.id === 'm' ? 20 : 16) * o.k, s);
+          }
+          S.wl[j] = { o, x: cx, y: cy, sx: pt.x, sy: pt.y, t: now };
+        });
+      }
+      if (now - st.ct > 250) { st.ct = now; st.p = b.dust.reduce((a, o) => a + clamp(1 - opaque(o) / o.init, 0, 1), 0) / b.dust.length; }
+      if (st.p >= st.goal) {
+        b.dust.forEach(o => b.tw.push(() => { o.m.material.opacity -= .06; if (o.m.material.opacity <= 0) { o.m.visible = false; return true; } return false; }));
+        toast(b.def.kind === 'solar' ? 'Panels clean: full power restored' : 'Joint clean'); return true;
+      }
+      return false;
+    } },
+  tune: { short: 'Re-point the antenna',
+    update(b, st, ptrs) {
+      const kp = proj(b.knob.getWorldPosition(tmpV)), tg = [{ key: b.knob, x: kp.x, y: kp.y }];
+      turnTargets(tg, ptrs, 95, (t, d) => { b.k += d; }); b.knobAct = tg.act;
+      b.err = b.e0 + b.k * .5; b.knobSpin.rotation.z = -b.k; b.piv.rotation.z = -b.err;
+      const tick = Math.round(b.k * 6); if (tick !== b.tick) { b.tick = tick; beep(1500, .015, 'square', .02); }
+      if (Math.abs(b.err) < .05) { b.e0 -= b.err; b.err = 0; b.piv.rotation.z = 0; toast('Signal lock: Earth acquired'); return true; }
+      return false;
+    } },
+  spin: { short: 'Test the pan axis',
+    begin(b) { b.spin = 0; },
+    update(b, st, ptrs) {
+      const hp = proj(b.holder.localToWorld(tmpV.set(0, 1.12, 0))), tg = [{ key: 'head', x: hp.x, y: hp.y }];
+      turnTargets(tg, ptrs, 85, (t, d) => { b.spin += d; }); b.spinAct = tg.act;
+      b.unit.g.rotation.y = -b.spin * .8;
+      const tick = Math.round(b.spin * 4); if (tick !== b.tick) { b.tick = tick; beep(1200, .015, 'square', .02); }
+      if (Math.abs(b.spin) >= (st.need || 4)) { toast('Pan axis moving freely'); return true; }
+      return false;
+    } },
+};
+
+function updateBench(dt, now, w, h, hv) {
+  bscene.updateMatrixWorld(true);
+  const ptrs = benchPointers(hv, now, dt);
+  let back = false;
+  for (const q of ptrs) {
+    if (q.id === 'm' || q.lost) continue; const S = q.S;
+    if (q.point && !S.drag && inBtn(q.x, q.y, w)) { S.backT += dt; if (S.backT > .6) back = true; } else S.backT = 0;
+  }
+  if (back) { exitBench(false, now); return; }
+  B.tw = B.tw.filter(f => !f(dt));
+  const t = now / 1000;
+  if (B.unit && B.unit.broken && !B.R.noPulse) for (const m of B.unit.mats) if (m.emissive) m.emissive.setRGB(.1 + .08 * Math.sin(t * 6), 0, 0);
+  if (B.ghost.g.visible) B.ghost.mats.forEach(m => m.opacity = .3 + .25 * Math.sin(t * 5));
+  if (!B.done) {
+    const st = B.steps[B.si];
+    if (STEP[st.t].update(B, st, ptrs, dt, now, w, h)) { st.done = true; beep(660, .08); beep(880, .1, 'sine', .07, .08); nextStep(B, now); }
+  } else if (now - B.doneT > 1800) { exitBench(true, now); return; }
+  bscene.updateMatrixWorld(true);
+}
+
+/* ================= 2D overlay ================= */
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const FONT = (ctx, px, wt = 400) => ctx.font = wt + ' ' + px + 'px "Segoe UI", system-ui, sans-serif';
+function skeleton(ctx, p, g, role, now, S) {
+  const col = role === 0 ? '70,217,255' : '255,176,0';
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(' + col + ',.35)'; ctx.beginPath();
+  for (const [a, b] of BONES) { ctx.moveTo(p[a].x, p[a].y); ctx.lineTo(p[b].x, p[b].y); }
+  ctx.stroke(); ctx.fillStyle = 'rgba(' + col + ',.9)'; ctx.beginPath();
+  for (let i = 0; i < 21; i++) { if (i && i % 4 === 0) continue; ctx.moveTo(p[i].x + 2.4, p[i].y); ctx.arc(p[i].x, p[i].y, 2.4, 0, PIE * 2); }
+  ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath();
+  for (let i = 4; i <= 20; i += 4) { ctx.moveTo(p[i].x + 4.5, p[i].y); ctx.arc(p[i].x, p[i].y, 4.5, 0, PIE * 2); }
+  ctx.fill();
+  if (role === 1 && g) {
+    if (g.g !== 'fist') { const k = clamp(1 - (g.pinchD - .12) / .4, 0, 1); ctx.strokeStyle = S.drag || S.tm === 'w' && S.tk ? '#5dff9e' : S.pinch ? '#ffb000' : 'rgba(255,255,255,.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(g.pp.x, g.pp.y, 8 + (1 - k) * 14, 0, PIE * 2); ctx.stroke(); if (k > .05) { ctx.fillStyle = S.pinch ? 'rgba(93,255,158,.5)' : 'rgba(255,176,0,.22)'; ctx.fill(); } }
+    if (G.mode !== 'bench' && S.g && !S.fired) { const q = S.g === 'v' ? p[8] : S.g === 'fist' ? p[9] : p[4]; ctx.strokeStyle = S.g === 'v' ? '#ff9a3c' : S.g === 'fist' ? '#ffffff' : '#5dff9e'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 22, -PIE / 2, -PIE / 2 + Math.min(1, (now - S.t) / (S.g === 'v' ? 900 : 1000)) * PIE * 2); ctx.stroke(); }
+  }
+}
+function panel(ctx, x, y, w, h) { ctx.fillStyle = 'rgba(5,9,16,.74)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = 'rgba(70,217,255,.35)'; ctx.lineWidth = 1; ctx.strokeRect(x + .5, y + .5, w, h); }
+function turnArrow(ctx, x, y, r, dir, alpha) {
+  const as = -PIE / 2 - dir * .7, ae = -PIE / 2 + dir * .7;
+  ctx.strokeStyle = ctx.fillStyle = 'rgba(255,176,0,' + alpha + ')'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(x, y, r, as, ae, dir < 0); ctx.stroke();
+  const hx = x + Math.cos(ae) * r, hy = y + Math.sin(ae) * r, tx = -Math.sin(ae) * dir, ty = Math.cos(ae) * dir, nx = Math.cos(ae), ny = Math.sin(ae);
+  ctx.beginPath(); ctx.moveTo(hx + tx * 8, hy + ty * 8); ctx.lineTo(hx - tx * 2 + nx * 6, hy - ty * 2 + ny * 6); ctx.lineTo(hx - tx * 2 - nx * 6, hy - ty * 2 - ny * 6); ctx.closePath(); ctx.fill();
+}
+function progRing(ctx, x, y, r, p, dir, col) { if (p <= 0) return; ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, r, -PIE / 2, -PIE / 2 + dir * Math.min(1, p) * PIE * 2, dir < 0); ctx.stroke(); }
+function dashRing(ctx, x, y, r, col, dashed) { ctx.strokeStyle = col; ctx.lineWidth = 2; if (dashed) ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.arc(x, y, r, 0, PIE * 2); ctx.stroke(); ctx.setLineDash([]); }
+
+const STEP_DRAW = {
+  unbolt: (b, st, ctx, now) => drawBolts(b, ctx, now, -1),
+  bolt: (b, st, ctx, now) => drawBolts(b, ctx, now, 1),
+  remove(b, st, ctx, now) {
+    const c = proj(b.bin), pul = .55 + .45 * Math.sin(now / 200);
+    ctx.strokeStyle = 'rgba(255,176,0,' + pul + ')'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(c.x - 62, c.y - 40); ctx.lineTo(c.x + 62, c.y - 40); ctx.lineTo(c.x + 48, c.y + 44); ctx.lineTo(c.x - 48, c.y + 44); ctx.closePath(); ctx.stroke();
+    if (b.unit && !b.unit.held) { const u = proj(b.unit.g.getWorldPosition(tmpV)); ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(c.x, c.y - 40); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.fillStyle = '#ffb000'; FONT(ctx, 13, 700); ctx.fillText('SCRAP BIN', c.x, c.y + 8);
+  },
+  fit(b, st, ctx, now) {
+    const s = proj(b.holder.getWorldPosition(tmpV));
+    dashRing(ctx, s.x, s.y, 46 + 4 * Math.sin(now / 180), 'rgba(93,255,158,.8)', true);
+    FONT(ctx, 12, 700); ctx.fillStyle = '#5dff9e'; ctx.fillText('SOCKET', s.x, s.y - 58);
+    if (b.rack.length) { const top = proj(tmpV.copy(b.rack[0].slot).setY(b.rack[0].slot.y + .75)); ctx.fillStyle = 'rgba(219,234,242,.7)'; FONT(ctx, 12, 700); ctx.fillText('SPARES RACK', top.x, top.y); }
+    FONT(ctx, 12, 600);
+    for (const it of b.rack) { if (it.held) continue; const p = proj(tmpV.copy(it.slot).setY(it.slot.y - .62)); ctx.fillStyle = 'rgba(93,255,158,.9)'; ctx.fillText(lname(it.def), p.x, p.y); }
+  },
+  unplug(b, st, ctx, now) { for (const pl of b.plugs) if (pl.state === 'on') { const t = termPos(b, pl); dashRing(ctx, t.x, t.y, 22 + 3 * Math.sin(now / 160), 'rgba(255,176,0,.85)', true); } },
+  plug(b, st, ctx, now) {
+    if (!b.unit) return;
+    for (const pl of b.plugs) if (pl.state !== 'on') { const t = termPos(b, pl); dashRing(ctx, t.x, t.y, 17, pl.c === W_BLK ? '#cfd6dc' : pl.c, true); FONT(ctx, 12, 700); ctx.fillStyle = '#fff'; ctx.fillText(pl.lab, t.x, t.y - 24); }
+  },
+  wipe(b, st, ctx, now, w, h) {
+    const p = clamp((st.p || 0) / st.goal, 0, 1), bw = Math.min(320, w - 40), x = w / 2 - bw / 2, y = h - 96;
+    ctx.fillStyle = 'rgba(5,9,16,.7)'; ctx.fillRect(x, y, bw, 10); ctx.fillStyle = p < 1 ? '#ffb000' : '#5dff9e'; ctx.fillRect(x, y, bw * p, 10);
+    FONT(ctx, 13, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(st.gauge(p), w / 2, y - 8);
+  },
+  tune(b, st, ctx, now, w) {
+    const ZAX = V(0, 0, 1), ax = b.dc.clone().sub(b.pc).applyAxisAngle(ZAX, -b.err).add(b.pc), dir = b.b0.clone().applyAxisAngle(ZAX, -b.err);
+    const a = proj(b.holder.localToWorld(tmpV.copy(ax))), e = proj(b.holder.localToWorld(tmpV.copy(ax).addScaledVector(dir, 1.8))), ep = proj(b.earth.getWorldPosition(tmpV));
+    const sig = Math.pow(Math.max(0, Math.cos(b.err)), 60);
+    ctx.strokeStyle = sig > .8 ? '#5dff9e' : 'rgba(70,217,255,.85)'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]); ctx.lineDashOffset = -now / 30;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(e.x, e.y); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    FONT(ctx, 12, 700); ctx.fillStyle = '#9fd0ff'; ctx.fillText('EARTH', ep.x, ep.y - 18);
+    const k = proj(b.knob.getWorldPosition(tmpV));
+    dashRing(ctx, k.x, k.y, 86, b.knobAct ? 'rgba(255,176,0,1)' : 'rgba(255,176,0,.5)', !b.knobAct);
+    turnArrow(ctx, k.x - 30, k.y - 70, 26, -1, .8); turnArrow(ctx, k.x + 30, k.y - 70, 26, 1, .8);
+    FONT(ctx, 12, 700); ctx.fillStyle = '#ffb000'; ctx.fillText('DRIVE KNOB', k.x, k.y + 108);
+    const px = w - 236, py = 72; panel(ctx, px, py, 220, 56);
+    for (let i = 0; i < 10; i++) { ctx.fillStyle = sig * 10 > i + .3 ? (sig > .8 ? '#5dff9e' : '#46d9ff') : 'rgba(219,234,242,.15)'; ctx.fillRect(px + 14 + i * 12, py + 30 - i * 1.6, 8, 12 + i * 1.6); }
+    ctx.textAlign = 'left'; FONT(ctx, 12, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText('Signal', px + 142, py + 22);
+    FONT(ctx, 12); ctx.fillStyle = '#9fd8ea'; ctx.fillText((b.err * 180 / PIE).toFixed(1) + '° off', px + 142, py + 40); ctx.textAlign = 'center';
+  },
+  spin(b, st, ctx, now) {
+    const hp = proj(b.holder.localToWorld(tmpV.set(0, 1.12, 0)));
+    dashRing(ctx, hp.x, hp.y, 60, b.spinAct ? 'rgba(255,176,0,1)' : 'rgba(255,176,0,.5)', !b.spinAct);
+    progRing(ctx, hp.x, hp.y, 60, Math.abs(b.spin) / (st.need || 4), Math.sign(b.spin) || 1, '#5dff9e');
+    turnArrow(ctx, hp.x - 28, hp.y - 80, 24, -1, .8); turnArrow(ctx, hp.x + 28, hp.y - 80, 24, 1, .8);
+  },
+};
+function drawBolts(b, ctx, now, dir) {
+  const cue = b.bolts.find(x => x.act && !x.done) || b.bolts.find(x => !x.done);   // one direction arrow, on the bolt being worked
+  for (const bo of b.bolts) {
+    if (bo.done && dir < 0) continue;
+    const s = proj(bo.g.getWorldPosition(tmpV));
+    if (bo.done) { FONT(ctx, 14, 700); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓', s.x, s.y - 26); continue; }
+    dashRing(ctx, s.x, s.y, 24, bo.act ? '#ffb000' : 'rgba(255,176,0,.5)', !bo.act);
+    progRing(ctx, s.x, s.y, 24, bo.prog, dir, '#5dff9e');
+    if (bo === cue) turnArrow(ctx, s.x, s.y, 36, dir, bo.act ? 1 : .6);
+    if (now - bo.wrongT < 900) { FONT(ctx, 13, 700); ctx.fillStyle = '#ff6b5a'; ctx.fillText('Other way ' + (dir < 0 ? '↺' : '↻'), s.x, s.y + 54); }
+  }
+}
+function drawWires(b, ctx) {
+  for (const pl of b.plugs) {
+    const a = proj(b.holder.localToWorld(tmpV.copy(pl.from))), p = plugPos(b, pl);
+    const mx = (a.x + p.x) / 2, my = Math.max(a.y, p.y) + 25 + Math.abs(a.x - p.x) * .15;
+    ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, p.x, p.y);
+    ctx.lineWidth = 8; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.stroke(); ctx.lineWidth = 5; ctx.strokeStyle = pl.c; ctx.stroke();
+    const s = pl.state === 'on' ? 1 : 1.3, ww = (pl.lab.length > 1 ? 34 : 20) * s, hh2 = 16 * s;
+    ctx.fillStyle = pl.c; ctx.strokeStyle = pl.state === 'held' ? '#5dff9e' : 'rgba(255,255,255,.7)'; ctx.lineWidth = pl.state === 'held' ? 2.5 : 1.2;
+    ctx.fillRect(p.x - ww / 2, p.y - hh2 / 2, ww, hh2); ctx.strokeRect(p.x - ww / 2, p.y - hh2 / 2, ww, hh2);
+    FONT(ctx, Math.round(11 * s), 700); ctx.fillStyle = pl.c === W_YEL ? '#1a1a1a' : '#fff'; ctx.textAlign = 'center'; ctx.fillText(pl.lab, p.x, p.y + 4 * s);
+  }
+  ctx.lineCap = 'butt';
+}
+function stepCount(b, st) {
+  if (st.t === 'unbolt' || st.t === 'bolt') return '  (' + b.bolts.filter(x => x.done).length + '/' + b.bolts.length + ')';
+  if (st.t === 'unplug') return '  (' + b.plugs.filter(x => x.state === 'loose').length + '/' + b.plugs.length + ')';
+  if (st.t === 'plug') return '  (' + b.plugs.filter(x => x.state === 'on').length + '/' + b.plugs.length + ')';
+  if (st.t === 'wipe') return '  (' + Math.round(100 * clamp((st.p || 0) / st.goal, 0, 1)) + '%)';
+  return '';
+}
+function benchHud(ctx, w, h, now) {
+  const st = B.done ? null : B.steps[B.si];
+  drawWires(B, ctx);
+  ctx.textAlign = 'center';
+  if (st && STEP_DRAW[st.t]) STEP_DRAW[st.t](B, st, ctx, now, w, h);
+  // checklist
+  const n = B.steps.length; panel(ctx, 16, 16, 340, 96 + n * 22);
+  ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('REPAIR BAY', 28, 36);
+  FONT(ctx, 15, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(B.def.name, 28, 56);
+  FONT(ctx, 12); ctx.fillStyle = B.done ? '#5dff9e' : '#ff8a7a'; ctx.fillText(B.done ? 'Fault cleared' : B.def.fault, 28, 75);
+  B.steps.forEach((s, i) => {
+    const cur = i === B.si; FONT(ctx, 13, cur ? 600 : 400); ctx.fillStyle = s.done ? '#5dff9e' : cur ? '#ffffff' : 'rgba(219,234,242,.45)';
+    ctx.fillText((s.done ? '✓ ' : cur ? '▶ ' : (i + 1) + '. ') + (s.short || STEP[s.t].short) + (cur ? stepCount(B, s) : ''), 28, 102 + i * 22);
+  });
+  // back button
+  panel(ctx, w - 156, 16, 140, 44);
+  const bt = Math.max(TS[0].backT, TS[1].backT); if (bt > 0) { ctx.fillStyle = 'rgba(70,217,255,.35)'; ctx.fillRect(w - 156, 16, 140 * Math.min(1, bt / .6), 44); }
+  ctx.textAlign = 'center'; FONT(ctx, 14, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText('← Back to rover', w - 86, 44);
+  // status line + toast
+  const t = Math.floor((now - rover.t0) / 1000);
+  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.6)'; ctx.fillText('Level ' + G.level + '  ·  ' + String(t / 60 | 0).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0') + '  ·  Errors ' + G.mistakes, w / 2, 28);
+  if (now - G.toastT < 3500) { FONT(ctx, 14); ctx.fillStyle = '#ffb000'; ctx.fillText(G.toast, w / 2, 52); }
+  // instruction
+  if (st) {
+    FONT(ctx, 18, 600); ctx.fillStyle = '#fff'; ctx.fillText(st.text, w / 2, h - 52);
+    FONT(ctx, 13); ctx.fillStyle = 'rgba(219,234,242,.75)'; ctx.fillText(HINTS[st.t][G.mouseOnly ? 1 : 0], w / 2, h - 28);
+  }
+  FONT(ctx, 12); ctx.fillStyle = 'rgba(219,234,242,.45)'; ctx.textAlign = 'right'; ctx.fillText('Esc back to rover · S sound', w - 16, h - 8); ctx.textAlign = 'center';
+  if (B.done) {
+    const bx = w / 2 - 200, by = h / 2 - 50; panel(ctx, bx, by, 400, 100);
+    FONT(ctx, 22, 600); ctx.fillStyle = '#5dff9e'; ctx.fillText('✓ Repair complete', w / 2, by + 42);
+    FONT(ctx, 14); ctx.fillStyle = '#dbeaf2'; ctx.fillText(B.def.name + ' is back online', w / 2, by + 72);
+  }
+}
+function hud(ctx, w, h, n, now) {
+  const F = (px, wt = 400) => FONT(ctx, px, wt);
+  ctx.textAlign = 'left';
+  const nf = rover.faults.length, fixed = rover.faults.filter(f => f.fixed).length, found = rover.faults.filter(f => f.scanned || f.fixed).length, testing = rover.testT && !rover.end;
+  const t = Math.floor(((rover.end || now) - rover.t0) / 1000);
+  panel(ctx, 16, 16, 290, 86 + nf * 20);
+  ctx.fillStyle = '#dbeaf2'; F(14, 600); ctx.fillText('Level ' + G.level + '   ' + String(t / 60 | 0).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'), 28, 38);
+  F(13); rover.faults.forEach((f, i) => { ctx.fillStyle = f.fixed ? '#5dff9e' : f.scanned ? '#ffb000' : 'rgba(219,234,242,.55)'; ctx.fillText((f.fixed ? '✓ ' : '• ') + (f.scanned || f.fixed ? f.def.name : 'Unscanned anomaly'), 28, 62 + i * 20); });
+  ctx.fillStyle = 'rgba(219,234,242,.75)'; ctx.fillText('Found ' + found + '/' + nf + '   Repaired ' + fixed + '/' + nf + '   Errors ' + G.mistakes, 28, 64 + nf * 20);
+  ctx.fillStyle = G.thermal ? '#ff9a3c' : 'rgba(219,234,242,.5)'; ctx.fillText((G.thermal ? 'Thermal · ' : '') + G.env + (G.lock ? ' · exploded' : '') + (G.muted ? ' · muted' : ''), 28, 84 + nf * 20);
+
+  panel(ctx, w - 156, 16, 140, 44); ctx.textAlign = 'center'; F(14, 600); ctx.fillStyle = G.locked ? '#5dff9e' : '#ffb000'; ctx.fillText(G.locked ? '🔒 Locked' : '🔓 Free', w - 86, 44);
+  const lp = TS.find(q => q.lastKey === 'lock' && q.hoverT > 0); if (lp) { ctx.fillStyle = 'rgba(70,217,255,.35)'; ctx.fillRect(w - 156, 16, 140 * Math.min(1, lp.hoverT / .6), 44); }
+  if (!G.locked && G.armed && G.still > .05) { ctx.fillStyle = 'rgba(255,176,0,.85)'; ctx.fillRect(w - 156, 62, 140 * Math.min(1, G.still / .8), 3); }
+
+  if (!Z.ph) for (const S of TS) {
+    const q = S.hoverQ, hov = S.hover; if (!q || !hov) continue;
+    ctx.textAlign = 'left'; F(13, 600);
+    const label = hov.def.name, sub = hov.scanned ? (hov.state === 'fault' ? hov.def.fault : hov.state === 'repaired' ? 'Repaired' : 'Nominal') : 'Scanning…', bw = Math.max(ctx.measureText(label).width, 230) + 24;
+    panel(ctx, q.x + 24, q.y - 20, bw, 48); ctx.fillStyle = '#dbeaf2'; ctx.fillText(label, q.x + 36, q.y); F(12); ctx.fillStyle = hov.state === 'fault' && hov.scanned ? '#ff6b5a' : '#9fd8ea'; ctx.fillText(sub, q.x + 36, q.y + 18);
+    if (S.hoverT > 0 && (!hov.scanned || hov.state === 'fault')) { ctx.strokeStyle = hov.state === 'fault' && hov.scanned ? '#ff6b5a' : '#46d9ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 20, -PIE / 2, -PIE / 2 + Math.min(1, S.hoverT / .45) * PIE * 2); ctx.stroke(); }
+  }
+  G.fx = G.fx.filter(e => now - e.t < 700);
+  for (const e of G.fx) { const k = (now - e.t) / 700; ctx.strokeStyle = 'rgba(93,255,158,' + (1 - k) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, 20 + k * 110, 0, PIE * 2); ctx.stroke(); }
+
+  ctx.textAlign = 'center';
+  if (rover.end) {
+    const bx = w / 2 - 190, by = h / 2 - 90; panel(ctx, bx, by, 380, 180);
+    ctx.fillStyle = '#5dff9e'; F(20, 600); ctx.fillText('Rover repaired. All systems nominal', w / 2, by + 34);
+    ctx.fillStyle = '#ffb000'; F(30); ctx.fillText('★'.repeat(rover.stars) + '☆'.repeat(3 - rover.stars), w / 2, by + 76);
+    ctx.fillStyle = '#dbeaf2'; F(14); const bt = best['L' + Math.min(1 + G.level, 4)];
+    ctx.fillText(t + ' s  ·  ' + G.mistakes + ' errors' + (rover.newBest ? '  ·  new best' : bt ? '  ·  best ' + Math.round(bt) + ' s' : ''), w / 2, by + 106);
+    ctx.fillStyle = 'rgba(219,234,242,.75)'; F(13); ctx.fillText((G.mouseOnly ? 'Space' : 'Thumbs-up or Space') + ' for level ' + (G.level + 1) + '  ·  R to retry', w / 2, by + 144);
+  }
+  let guide = '';
+  if (rover.end) guide = '';
+  else if (testing) guide = 'Systems check: wheels, mast, antenna and arm';
+  else if (G.mouseOnly) guide = 'Hover over a part to scan it. A faulty part opens the repair bay. Drag empty space to turn the rover';
+  else if (n === 0) guide = 'Raise one hand to pick up the rover';
+  else if (n === 1 && !G.locked) guide = 'Bring your other hand in to scan the rover';
+  else guide = 'Point at a part to scan it. Keep pointing at a faulty part to open the repair bay';
+  F(16, 600); ctx.fillStyle = '#fff'; ctx.fillText(guide, w / 2, 34);
+  if (now - G.toastT < 3500) { F(14); ctx.fillStyle = '#ffb000'; ctx.fillText(G.toast, w / 2, 58); }
+  F(12); ctx.fillStyle = 'rgba(219,234,242,.55)'; ctx.textAlign = 'right'; ctx.fillText('T thermal · L lock · A auto-lock · F hint · E explode · H swap hands · M env · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
+}
+</script>
+</body>
+</html>

@@ -172,6 +172,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="shared/anim.js"></script>
 <script src="shared/models.js"></script>
+<script src="shared/visuals.js"></script>
 <script>
 /* ================= data ================= */
 const $ = id => document.getElementById(id), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'), clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -233,6 +234,7 @@ $('bAudio').onclick = () => audioOn(!drone);
 
 /* ================= three.js: one renderer, a solar-system scene and a close-up scene ================= */
 const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight); renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 3000);
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 function tex(kind, seed = 3) {   // painted planet textures
@@ -258,25 +260,32 @@ function nebula() {   // a few faint coloured clouds far behind everything (spri
   return g;
 }
 /* --- solar system (not to scale) --- */
-const sys = new THREE.Scene(); sys.add(nebula(), stars(2600, 1200)); sys.add(new THREE.AmbientLight(0x30384a, .9)); const sunL = new THREE.PointLight(0xfff2d8, 2.2, 0, 1.2); sys.add(sunL);
+const sys = new THREE.Scene(); sys.add(nebula(), stars(2600, 1200)); sys.add(new THREE.AmbientLight(0x30384a, .45)); const sunL = new THREE.PointLight(0xfff2d8, 2.2, 0, 1.2); sys.add(sunL);
 const sun = new THREE.Mesh(new THREE.SphereGeometry(4, 40, 24), new THREE.MeshBasicMaterial({ color: 0xfff1c9 })); sys.add(sun);
 for (const [s, o] of [[34, .95], [70, .35]]) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,236,190,1)', 'rgba(255,190,90,.45)'), transparent: true, opacity: o, depthWrite: false, blending: THREE.AdditiveBlending })); sp.scale.set(s, s, 1); sys.add(sp); }
 const PL = {};
+/* Saturn's rings: bands of ice and dust painted along the radius */
+function saturnRing(r) {
+  const geo = new THREE.RingGeometry(r * 1.35, r * 2.35, 128, 1), p = geo.attributes.position, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) uv.setXY(i, (Math.hypot(p.getX(i), p.getY(i)) - r * 1.35) / (r * 1.0), .5);
+  const t = VIS.paint(512, 4, (c, w) => { for (let x = 0; x < w; x++) { const k = x / w, a = (.35 + .5 * Math.abs(Math.sin(k * 40) * Math.sin(k * 13 + 1))) * (k > .62 && k < .67 ? .08 : 1) * Math.min(1, k * 8) * Math.min(1, (1 - k) * 10); c.fillStyle = 'rgba(' + (210 + 30 * Math.sin(k * 9) | 0) + ',' + (190 + 25 * Math.sin(k * 9) | 0) + ',150,' + a.toFixed(3) + ')'; c.fillRect(x, 0, 1, 4); } });
+  const rg = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: t, side: THREE.DoubleSide, transparent: true, depthWrite: false, roughness: .9 })); rg.rotation.x = Math.PI / 2.3; return rg;
+}
 function planet(name, kind, r, orbit, period, phase, ring) {
-  const g = new THREE.Group(), m = new THREE.Mesh(new THREE.SphereGeometry(r, 40, 24), new THREE.MeshStandardMaterial({ map: tex(kind, name.length * 7 + 3), roughness: 1, metalness: 0 })); g.add(m);
-  if (ring) { const rg = new THREE.Mesh(new THREE.RingGeometry(r * 1.4, r * 2.3, 64), new THREE.MeshBasicMaterial({ color: 0xd8c59a, side: THREE.DoubleSide, transparent: true, opacity: .55 })); rg.rotation.x = Math.PI / 2.3; g.add(rg); }
+  const g = new THREE.Group(), P = VIS.planet(renderer, kind, r, { res: ['earth', 'moon', 'mars'].includes(kind) ? 2048 : 512, sun: new THREE.Vector3(), point: true, bump: .6 }), m = P.userData.surface; g.add(P); g.userData.planet = P;
+  if (ring) g.add(saturnRing(r));
   sys.add(g); const ln = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 160 }, (_, i) => new THREE.Vector3(Math.cos(i / 160 * 6.283) * orbit, 0, Math.sin(i / 160 * 6.283) * orbit))), new THREE.LineBasicMaterial({ color: 0x46d9ff, transparent: true, opacity: .13 })); sys.add(ln);
   return PL[name] = { g, m, r, orbit, period, phase };
 }
 planet('mercury', 'mercury', .6, 9, 20, 1.2); planet('venus', 'venus', 1.1, 14, 32, 4.1); planet('earth', 'earth', 1.25, 20, 52, 2.2); planet('mars', 'mars', .95, 28, 98, .5);
 planet('jupiter', 'jupiter', 3, 44, 300, 3.4); planet('saturn', 'saturn', 2.5, 60, 500, 5.2, true);
-const moon = new THREE.Mesh(new THREE.SphereGeometry(.42, 32, 20), new THREE.MeshStandardMaterial({ map: tex('moon', 9), roughness: 1 })); PL.earth.g.add(moon); PL.moon = { m: moon };
+const moon = VIS.planet(renderer, 'moon', .42, { res: 2048, bump: .6 }); PL.earth.g.add(moon); PL.moon = { m: moon };
 const BEACON = { moon: () => moon.getWorldPosition(new THREE.Vector3()), mars: () => PL.mars.g.getWorldPosition(new THREE.Vector3()) };
 const rings = {}; for (const b of ['moon', 'mars']) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,210,120,1)', 'rgba(255,176,0,.35)'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); sp.scale.set(3, 3, 1); sys.add(sp); rings[b] = sp; }
 let simT = 0; const view = { th: .9, ph: .95, d: 92, tth: .9, tph: .95, td: 92, target: new THREE.Vector3(), focus: null };
 function stepSystem(dt) {
   if (!reduced()) simT += dt;
-  for (const k of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn']) { const p = PL[k], a = p.phase + simT * 6.283 / p.period; p.g.position.set(Math.cos(a) * p.orbit, 0, Math.sin(a) * p.orbit); p.m.rotation.y += dt * .2; }
+  for (const k of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn']) { const p = PL[k], a = p.phase + simT * 6.283 / p.period; p.g.position.set(Math.cos(a) * p.orbit, 0, Math.sin(a) * p.orbit); p.m.rotation.y += dt * .2; p.g.userData.planet.userData.update(dt); }
   const ma = simT * .9; moon.position.set(Math.cos(ma) * 3, .3, Math.sin(ma) * 3);
   for (const b in rings) { rings[b].position.copy(BEACON[b]()); const s = 2.4 + Math.sin(performance.now() / 300) * .5; rings[b].scale.set(s, s, 1); }
   view.th += (view.tth - view.th) * Math.min(1, dt * 4); view.ph += (view.tph - view.ph) * Math.min(1, dt * 4); view.d += (view.td - view.d) * Math.min(1, dt * 3);
@@ -284,12 +293,11 @@ function stepSystem(dt) {
   camera.position.set(view.target.x + Math.sin(view.th) * Math.sin(view.ph) * view.d, view.target.y + Math.cos(view.ph) * view.d, view.target.z + Math.cos(view.th) * Math.sin(view.ph) * view.d); camera.lookAt(view.target);
 }
 /* --- close-up: the rover's world (or Earth for the launch chapter) --- */
-const close = new THREE.Scene(); close.add(nebula(), stars(1800, 1000)); close.add(new THREE.AmbientLight(0x2a3040, .7)); const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(-8, 4, 10); close.add(key);
-const bigTex = { earth: tex('earth', 5), moon: tex('moon', 9), mars: tex('mars', 11) };
-const big = new THREE.Mesh(new THREE.SphereGeometry(6, 64, 40), new THREE.MeshStandardMaterial({ map: bigTex.earth, roughness: 1 })); close.add(big);
-const atmo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(120,180,255,.0)', 'rgba(120,180,255,.18)'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); atmo.scale.set(17, 17, 1); close.add(atmo);
+const close = new THREE.Scene(); close.add(nebula(), stars(1800, 1000)); close.add(new THREE.AmbientLight(0x2a3040, .22)); const key = new THREE.DirectionalLight(0xfff6ea, 2.4); key.position.set(-8, 4, 10); close.add(key);
+const big = new THREE.Group(); close.add(big); const atmo = new THREE.Object3D();
+const bigP = {}; for (const k of ['earth', 'moon', 'mars']) { bigP[k] = VIS.planet(renderer, k, 6, { res: 2048, sun: key.position.clone().normalize() }); bigP[k].visible = k === 'earth'; big.add(bigP[k]); }
 let bigKind = 'earth', bigPulse = 0;
-function setBig(kind) { if (kind === bigKind) return; bigKind = kind; big.material.map = bigTex[kind]; big.material.color.setHex(kind === 'moon' ? 0x9a9a9a : 0xffffff); big.material.needsUpdate = true; bigPulse = 1; atmo.material.map = glowTex('rgba(0,0,0,0)', kind === 'mars' ? 'rgba(230,140,90,.16)' : kind === 'moon' ? 'rgba(200,200,210,.05)' : 'rgba(120,180,255,.18)'); }
+function setBig(kind) { if (kind === bigKind) return; bigKind = kind; for (const k in bigP) bigP[k].visible = k === kind; bigPulse = 1; }
 
 /* ================= input on the solar system ================= */
 let drag = null;
@@ -393,7 +401,7 @@ setInterval(() => { $('clock').textContent = 'UTC ' + new Date().toISOString().s
 let last = performance.now();
 (function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min(.05, (now - last) / 1000); last = now;
-  if (mode === 'tx') { big.rotation.y += dt * .06; bigPulse = Math.max(0, bigPulse - dt * 1.5); const s = 1 - bigPulse * .06; big.scale.setScalar(s); const x = innerWidth > 820 ? 3.2 : 0; big.position.set(x, .5, 0); atmo.position.copy(big.position);
+  if (mode === 'tx') { big.rotation.y += dt * .06; bigP[bigKind].userData.update(dt); bigPulse = Math.max(0, bigPulse - dt * 1.5); const s = 1 - bigPulse * .06; big.scale.setScalar(s); const x = innerWidth > 820 ? 3.2 : 0; big.position.set(x, .5, 0); atmo.position.copy(big.position);
     camera.position.set(0, 0, txCam.z); camera.lookAt(0, 0, 0); renderer.render(close, camera); }
   else { stepSystem(dt); renderer.render(sys, camera); if (mode === 'hub') layoutLabels(); else { view.tth += dt * .03; } }
 })(last);

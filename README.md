@@ -30,6 +30,7 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 | `repair.html` | The hand-tracked repair bay (formerly v8). Opened with `?story=1&mission=…` it runs only that mission's repairs and returns to the story; opened on its own it is free play with all repairs |
 | `shared/models.js` | Rover 3D models, NASA mission history, and the 2075 story data, used by all three pages |
 | `shared/anim.js` | Small GSAP helpers (cards and lists animating in, eased rocket flight and landing, camera moves). Does nothing if GSAP is missing or reduced motion is on |
+| `shared/visuals.js` | High-detail visuals made in code: Earth, Moon, Mars and the other planets painted on the GPU from noise (bump maps, oceans, clouds, atmospheres), the RECLAIM lander (panels, landing legs, engine bells, exhaust), the 2075 spacesuit (visor, backpack, joints, lit details) and dust plumes |
 | `shared/voice.js` | Spoken lines with typed, disappearing subtitles and a mute button. Plays `audio/vo/*.mp3` when present, otherwise the browser's speech voice |
 | `VOICEOVER.md`, `audio/vo/`, `tools/` | Voiceover scripts (`lines.csv`) and how to record them with VoiceStudio |
 | `drafts/` | Earlier versions (v6, v7) |
@@ -37,9 +38,9 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 ## Controls
 
 - **Repairs:** you choose at the first repair (with "Never ask again" / "Ask again"); scroll to zoom. Webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse. In the main view, hold still for a moment (or press L / the 🔒 button) to lock the rover so both hands are free; A turns auto-lock on or off. Each repair step shows a numbered **How to** list in the task panel.
-- **Walking:** WASD, Shift to run, drag the mouse to look, E to interact.
+- **Walking:** WASD, Shift to run, Space to jump (real lunar and Martian gravity: higher, slower jumps on the Moon), drag the mouse to look, E to interact.
 - **Dialogue:** Enter once shows the whole subtitle, Enter again skips to the next line. 🔊 mutes the voice.
-- **Driving:** W/S, A/D, Shift for slow and careful, E to interact. Opportunity: F fast-forwards time while parked (panels only charge in daylight).
+- **Driving:** W/S, A/D, Shift for slow and careful, E to interact. Opportunity: F fast-forwards time while parked (panels only charge in daylight). If the battery reaches 0% the drive fails, its science scans are lost and it restarts from the beginning (other missions are kept).
 - **Repair bay:** right-drag, arrow keys or the ⟲ ⟳ ⤒ ⤓ buttons turn and tilt the rover; scroll to zoom.
 
 ## Running it

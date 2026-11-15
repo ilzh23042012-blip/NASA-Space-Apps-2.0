@@ -169,6 +169,8 @@
 <div id="fade"><span>RETUNING SIGNAL</span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="shared/anim.js"></script>
 <script src="shared/models.js"></script>
 <script>
 /* ================= data ================= */
@@ -327,17 +329,17 @@ function layoutLabels() {
     el.style.display = p.ok && k !== 'moon' && !(k === 'earth' && view.focus === 'moon') ? '' : 'none'; el.style.left = p.x + 'px'; el.style.top = (p.y + (k === 'sun' ? 46 : 16)) + 'px'; });
   $('lines').innerHTML = svg;
 }
-function toast(t, ms = 3800) { $('toast').textContent = t; $('toast').style.opacity = 1; clearTimeout(toast.t); toast.t = setTimeout(() => $('toast').style.opacity = 0, ms); }
+function toast(t, ms = 3800) { $('toast').textContent = t; $('toast').style.opacity = 1; ANIM.pop($('toast'), 1.12); clearTimeout(toast.t); toast.t = setTimeout(() => $('toast').style.opacity = 0, ms); }
 $('finale').onclick = () => { if (doneCount() < 4) { toast('COMPLETE ALL FOUR EXPEDITIONS TO UNLOCK THE FINALE'); blip(220, .12); return; } go('story.html?ending=1'); };
 function unlockAnim() {   // after the fourth expedition: the finale card unlocks in front of the player
   const f = $('finale'); f.classList.add('locked'); $('fLock').textContent = '🔒'; $('fK').textContent = 'FINALE · LOCKED';
   setTimeout(() => { f.classList.add('opening'); blip(440, .1); blip(660, .1, .05, .12); }, 900);
-  setTimeout(() => { f.classList.remove('opening', 'locked'); f.classList.add('opened'); $('fLock').textContent = '🔓'; $('fK').textContent = 'FINALE · UNLOCKED'; $('fS').textContent = 'All four transmissions received';
+  setTimeout(() => { f.classList.remove('opening', 'locked'); f.classList.add('opened'); ANIM.pop(f, 1.1); $('fLock').textContent = '🔓'; $('fK').textContent = 'FINALE · UNLOCKED'; $('fS').textContent = 'All four transmissions received';
     toast('ALL FOUR TRANSMISSIONS RECEIVED · FINALE UNLOCKED', 5000); [523, 659, 784, 1047].forEach((n, i) => blip(n, .18, .06, i * .1)); f.focus({ preventScroll: true }); }, 2000);
 }
 
 /* ================= transmission (a rover's story) ================= */
-let cur = null, chap = 0;
+let cur = null, chap = 0; const txCam = { z: 19 };
 function openTx(id) { blip(880, .06); fadeThrough(() => { cur = id; chap = 0; mode = 'tx'; show('tx'); renderTx(); }); }
 function renderTx() {
   const m = M(cur), T = TX[cur], R = RECLAIM[cur], last = chap === T.ch.length, [st, col] = statusOf(cur);
@@ -348,12 +350,13 @@ function renderTx() {
   else { setBig(T.body); $('sT').textContent = 'Expedition 2075';
     $('sB').innerHTML = '<span class="tag" style="color:var(--orange)">FICTIONAL 2075 EXPEDITION</span><p>' + esc(R.task) + '</p><p style="color:var(--dim);font-size:.9rem">Fly to ' + esc(m.where) + ', walk up to ' + esc(m.short) + ', repair it with your hands or the mouse, and drive it one last time.</p>';
     $('sL').innerHTML = '<button class="btn amber" id="launch" type="button">▶ ' + (prog()[cur] ? 'REPLAY EXPEDITION' : 'LAUNCH EXPEDITION') + '</button>'; $('launch').onclick = () => go('story.html?mission=' + encodeURIComponent(cur)); }
+  ANIM.stagger([$('sK'), $('sN'), $('sT'), ...$('sB').children, ...$('sL').children], { opacity: 0, y: 12 });
   $('dots').innerHTML = Array.from({ length: T.ch.length + 1 }, (_, i) => '<i class="' + (i === chap ? 'on' : '') + '"></i>').join('');
   $('bBack').disabled = chap === 0; $('bBack').style.opacity = chap === 0 ? .4 : 1; $('bNext').style.display = last ? 'none' : '';
   (last ? $('launch') : $('bNext')).focus({ preventScroll: true });
 }
-$('bNext').onclick = () => { chap = Math.min(TX[cur].ch.length, chap + 1); blip(660, .05); renderTx(); };
-$('bBack').onclick = () => { chap = Math.max(0, chap - 1); blip(520, .05); renderTx(); };
+$('bNext').onclick = () => { chap = Math.min(TX[cur].ch.length, chap + 1); blip(660, .05); renderTx(); ANIM.to(txCam, { z: 19 - chap * .6, duration: 1.2, ease: 'power2.out' }); };
+$('bBack').onclick = () => { chap = Math.max(0, chap - 1); blip(520, .05); renderTx(); ANIM.to(txCam, { z: 19 - chap * .6, duration: 1.2, ease: 'power2.out' }); };
 $('bHub').onclick = () => fadeThrough(() => { mode = 'hub'; show('hub'); setHot(null); });
 addEventListener('keydown', e => {
   if (document.querySelector('.modal.on')) { if (e.key === 'Escape') closeModals(); return; }
@@ -361,9 +364,10 @@ addEventListener('keydown', e => {
 });
 
 /* ================= views, fades, navigation ================= */
-function show(v) { for (const id of ['intro', 'hub', 'tx']) $(id).classList.toggle('on', id === v); $('ticker').style.display = v === 'intro' ? 'none' : 'flex'; if (v === 'hub') { renderList(); } }
+function show(v) { for (const id of ['intro', 'hub', 'tx']) $(id).classList.toggle('on', id === v); $('ticker').style.display = v === 'intro' ? 'none' : 'flex'; if (v === 'hub') { renderList(); ANIM.stagger($('list').querySelectorAll('.head,.grp,.row'), { opacity: 0, x: -16 }, .15); ANIM.stagger(labEls, { opacity: 0, x: 18 }, .35); ANIM.stagger([$('finale')], { opacity: 0, y: 20 }, .5); }
+  if (v === 'tx') { txCam.z = 30; ANIM.to(txCam, { z: 19, duration: 1.6, ease: 'power3.out' }); } }
 function fadeThrough(fn) { $('fade').classList.add('on'); setTimeout(() => { fn(); setTimeout(() => $('fade').classList.remove('on'), 120); }, 560); }
-function go(url) { $('fade').classList.add('on'); $('fade').querySelector('span').textContent = 'LAUNCHING'; setTimeout(() => location.href = url, 600); }
+function go(url) { if (mode === 'tx') ANIM.to(txCam, { z: 9, duration: .7, ease: 'power2.in' }); $('fade').classList.add('on'); $('fade').querySelector('span').textContent = 'LAUNCHING'; setTimeout(() => location.href = url, 600); }
 function enterHub(after) { fadeThrough(() => { mode = 'hub'; show('hub'); if (after) after(); }); }
 /* intro: the line types itself, then the uplink button lights up */
 function intro() {
@@ -376,7 +380,7 @@ function intro() {
 function closeModals() { document.querySelectorAll('.modal').forEach(m => m.classList.remove('on')); }
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = closeModals);
 document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModals(); }));
-$('bAbout').onclick = () => { $('mAbout').classList.add('on'); $('mAbout').querySelector('[data-close]').focus(); };
+$('bAbout').onclick = () => { $('mAbout').classList.add('on'); ANIM.card($('mAbout').firstElementChild); $('mAbout').querySelector('[data-close]').focus(); };
 $('bAccess').onclick = () => { $('oMotion').checked = pref('ltMotion') === '1'; $('oBig').checked = pref('ltBig') === '1'; $('accMsg').textContent = ''; $('mAccess').classList.add('on'); $('oMotion').focus(); };
 $('oMotion').onchange = e => { setPref('ltMotion', e.target.checked ? '1' : '0'); applyAccess(); };
 $('oBig').onchange = e => { setPref('ltBig', e.target.checked ? '1' : '0'); applyAccess(); };
@@ -390,7 +394,7 @@ let last = performance.now();
 (function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min(.05, (now - last) / 1000); last = now;
   if (mode === 'tx') { big.rotation.y += dt * .06; bigPulse = Math.max(0, bigPulse - dt * 1.5); const s = 1 - bigPulse * .06; big.scale.setScalar(s); const x = innerWidth > 820 ? 3.2 : 0; big.position.set(x, .5, 0); atmo.position.copy(big.position);
-    camera.position.set(0, 0, 19); camera.lookAt(0, 0, 0); renderer.render(close, camera); }
+    camera.position.set(0, 0, txCam.z); camera.lookAt(0, 0, 0); renderer.render(close, camera); }
   else { stepSystem(dt); renderer.render(sys, camera); if (mode === 'hub') layoutLabels(); else { view.tth += dt * .03; } }
 })(last);
 const done = QS.get('done');

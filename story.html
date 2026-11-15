@@ -91,6 +91,8 @@
 <div id="fade"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="shared/anim.js"></script>
 <script src="shared/models.js"></script>
 <script src="shared/voice.js"></script>
 <script>
@@ -126,16 +128,16 @@ const arp = n => n.forEach((f, i) => beep(f, .16, 'triangle', .07, i * .1));
 
 /* ================= UI helpers ================= */
 let toastT = 0;
-function toast(t, ms = 4000) { $('toast').textContent = t; $('toast').style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => $('toast').style.opacity = 0, ms); }
+function toast(t, ms = 4000) { $('toast').textContent = t; $('toast').style.opacity = 1; ANIM.pop($('toast'), 1.1); clearTimeout(toastT); toastT = setTimeout(() => $('toast').style.opacity = 0, ms); }
 /* facts and guidance are spoken, with typed subtitles that fade away (shared/voice.js) */
 VO.init({ bottom: 140, mute: { left: '14px', bottom: '14px' } });
 /* a small, non-blocking fact panel (gameplay keeps running) */
 let factT = 0;
-function factBox(title, html, kick = 'REAL NASA HISTORY', ms = 14000) { $('fKick').textContent = kick; $('fTitle').textContent = title; $('fText').innerHTML = html; $('fact').style.display = 'block'; clearTimeout(factT); factT = setTimeout(() => $('fact').style.display = 'none', ms); }
+function factBox(title, html, kick = 'REAL NASA HISTORY', ms = 14000) { $('fKick').textContent = kick; $('fTitle').textContent = title; $('fText').innerHTML = html; $('fact').style.display = 'block'; ANIM.stagger([$('fact')], { opacity: 0, x: -24 }); clearTimeout(factT); factT = setTimeout(() => $('fact').style.display = 'none', ms); }
 function say(id, opt) { beep(880, .06); beep(1320, .08, 'sine', .04, .07); return VO.say(id, opt); }
 function showCard(html, buttons) {
   $('cardBox').innerHTML = html + '<div class="row">' + buttons.map((b, i) => '<button class="btn' + (b.sec ? ' sec' : '') + '" data-i="' + i + '" type="button">' + esc(b.label) + '</button>').join('') + '</div>';
-  $('card').style.display = 'flex'; S.card = true; VO.lift(true);
+  $('card').style.display = 'flex'; S.card = true; VO.lift(true); ANIM.card($('cardBox'));
   $('cardBox').querySelectorAll('button[data-i]').forEach(el => el.onclick = () => { const b = buttons[+el.dataset.i]; if (!b.keep) hideCard(); b.on && b.on(); });
   const first = $('cardBox').querySelector('button'); if (first) first.focus({ preventScroll: true });
 }
@@ -400,9 +402,15 @@ function buildDrivable(part) {
 function placeRover(dt) {
   const r = rover, fx = Math.cos(r.h), fz = -Math.sin(r.h), L = WORLD.env === 'MOON' ? 1.2 : .7, Wd = WORLD.env === 'MOON' ? 1 : .6;
   const hf = height(r.x + fx * L, r.z + fz * L), hb = height(r.x - fx * L, r.z - fz * L), hl = height(r.x - fz * Wd, r.z + fx * Wd), hr = height(r.x + fz * Wd, r.z - fx * Wd);
-  const y = (hf + hb + hl + hr) / 4 - (r.sink || 0);
-  r.root.position.set(r.x, y, r.z); r.root.rotation.set(0, 0, 0); r.root.rotation.order = 'YXZ';
-  r.root.rotation.y = r.h; r.root.rotation.z = Math.atan2(hf - hb, 2 * L); r.root.rotation.x = Math.atan2(hl - hr, 2 * Wd) * -1;
+  const y = (hf + hb + hl + hr) / 4 - (r.sink || 0), pz = Math.atan2(hf - hb, 2 * L), px = Math.atan2(hl - hr, 2 * Wd) * -1;
+  if (!dt || r.ty == null) { r.ty = y; r.tz = pz; r.tx = px; r.pv = r.v || 0; r.vy = 0; }
+  const st = Math.max(dt || 0, 1e-3), acc = clamp(((r.v || 0) - r.pv) / st, -6, 6); r.pv = r.v || 0;
+  // a soft spring follows the ground, so bumps make the body bounce a little instead of snapping
+  r.vy += ((y - r.ty) * 90 - r.vy * 11) * st; r.ty += r.vy * st; if (Math.abs(y - r.ty) > .6) { r.ty = y; r.vy = 0; }
+  const k = Math.min(1, st * 7), roll = clamp((r.steer || 0) * (r.v || 0) * .022, -.07, .07), squat = clamp(acc * .012, -.045, .045);
+  r.tz += (pz + squat - r.tz) * k; r.tx += (px + roll - r.tx) * k;
+  r.root.position.set(r.x, r.ty + Math.sin((r.odo || 0) * 7) * .008 * Math.min(1, Math.abs(r.v || 0)), r.z); r.root.rotation.set(0, 0, 0); r.root.rotation.order = 'YXZ';
+  r.root.rotation.y = r.h; r.root.rotation.z = r.tz; r.root.rotation.x = r.tx;
 }
 function collide(x, z, r, ignore) {
   const out = { x, z, hit: false }; const obs = [...ROCKS, { x: 0, z: 0, r: 3.2 }];
@@ -484,12 +492,12 @@ function travel(from, to, onDone, label) {
   S.scene = sc; $('skip').style.display = 'block'; fadeTo(0, 600); rumble(2.5, .08);
   const t0 = performance.now(), dur = 7200; S.skip = false; let done = false;
   S.tick = (dt, now) => {
-    const k = clamp((now - t0) / dur, 0, 1), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2, p = curve.getPointAt(e), tan = curve.getTangentAt(Math.min(.999, e + .001));
-    r.position.copy(p); r.quaternion.setFromUnitVectors(up, tan.normalize()); r.userData.flame.scale.setScalar(.8 + Math.random() * .4); r.userData.flame.visible = k < .92;
+    const E = ANIM.ease('power3.inOut'), k = clamp((now - t0) / dur, 0, 1), e = E(k), spd = clamp((E(Math.min(1, k + .01)) - e) * 60, 0, 1.4), p = curve.getPointAt(e), tan = curve.getTangentAt(Math.min(.999, e + .001));
+    r.position.copy(p); r.quaternion.setFromUnitVectors(up, tan.normalize()); r.rotateY(k * 2.2); r.userData.flame.scale.setScalar(.45 + spd * .6 + Math.random() * .25); r.userData.flame.visible = k < .92;
     trailPts.push(p.clone()); if (trailPts.length > 160) trailPts.shift(); trail.geometry.setFromPoints(trailPts);
     for (const b of Object.values(BODY)) if (b.mesh) b.mesh.rotation.y += dt * .05;
     const camPos = p.clone().addScaledVector(tan, -6 + k * 2).addScaledVector(up, 2.2).addScaledVector(side, 3.5);
-    camera.position.lerp(camPos, k < .02 ? 1 : Math.min(1, dt * 3)); camera.lookAt(p.clone().lerp(Bb.p, .35 + k * .3));
+    camera.position.lerp(camPos, k < .02 ? 1 : Math.min(1, dt * 3)); camera.lookAt(p.clone().lerp(Bb.p, .35 + k * .3)); camera.rotateZ(Math.sin(k * Math.PI) * .06);
     if ((k >= 1 || S.skip) && !done) { done = true; $('skip').style.display = 'none'; fadeTo(1, 500).then(onDone); }
   };
   setObjective(label || 'En route', null);
@@ -500,13 +508,14 @@ function arriveSurface(landing) {
   buildSurface(); S.scene = scene; S.ap = { x: 0, z: -4.2, yaw: Math.PI, v: 0 }; placeAstro();
   if (!landing) return;
   astro.g.visible = false; rocket.position.y = height(0, 0) + 60; rocket.userData.flame.visible = true;
-  camera.position.set(13, Math.max(height(13, 17), height(6, 8), height(0, 0)) + 6.5, 17); const t0 = performance.now(); fadeTo(0, 700); rumble(3.5, .14); $('skip').style.display = 'block'; S.skip = false;
+  const camY = Math.max(height(13, 17), height(6, 8), height(0, 0)) + 6.5; camera.position.set(19, camY + 9, 25); ANIM.to(camera.position, { x: 13, y: camY, z: 17, duration: 4.2, ease: 'power2.out' }); const t0 = performance.now(); fadeTo(0, 700); rumble(3.5, .14); $('skip').style.display = 'block'; S.skip = false;
   setObjective('Landing at ' + C.where, null);
   S.tick = (dt, now) => {
-    const k = clamp((now - t0) / 4200, 0, 1), base = height(0, 0); rocket.position.y = base + 60 * Math.pow(1 - (S.skip ? 1 : k), 2.4);
+    const k = clamp((now - t0) / 4200, 0, 1), base = height(0, 0); rocket.position.y = base + 60 * (1 - ANIM.ease('power3.out')(S.skip ? 1 : k)); rocket.rotation.z = Math.sin(now / 260) * .015 * (1 - k);
     rocket.userData.flame.scale.setScalar(.6 + Math.random() * .35 + (1 - k) * .3); camera.lookAt(0, rocket.position.y * .6 + 4, 0);
     if (k > .85 && Math.random() < .6) emitDust((Math.random() - .5) * 6, base + .2, (Math.random() - .5) * 6, 3, 1.5);
-    if (k >= 1 || S.skip) { rocket.position.y = base; rocket.userData.flame.visible = false; $('skip').style.display = 'none'; S.tick = null; beep(220, .2); setTimeout(showIntro, 500); astro.g.visible = true; placeAstro(); }
+    if (k >= 1 || S.skip) { ANIM.kill(camera.position); if (S.skip) camera.position.set(13, camY, 17); rocket.position.y = base; rocket.rotation.z = 0; rocket.userData.flame.visible = false;
+      if (ANIM.on) { gsap.fromTo(rocket.scale, { y: .9, x: 1.05, z: 1.05 }, { y: 1, x: 1, z: 1, duration: .9, ease: 'elastic.out(1,.35)' }); for (let i = 0; i < 24; i++) emitDust(Math.cos(i / 3.82) * 3, base + .2, Math.sin(i / 3.82) * 3, 2, 2.2); } $('skip').style.display = 'none'; S.tick = null; beep(220, .2); setTimeout(showIntro, 500); astro.g.visible = true; placeAstro(); }
   };
 }
 function showIntro() {
@@ -529,6 +538,7 @@ function startInspect() {
   S.phase = 'inspect'; setPrompt(null); setKeys(''); beep(660, .1);
   const a = S.ap, ang = Math.atan2(a.x - rover.x, a.z - rover.z), tx = rover.x + Math.sin(ang) * (rover.r + .9), tz = rover.z + Math.cos(ang) * (rover.r + .9), t0 = performance.now();
   const camGoal = new THREE.Vector3(rover.x + Math.sin(ang + .7) * 4.5, height(rover.x, rover.z) + 2.4, rover.z + Math.cos(ang + .7) * 4.5);
+  ANIM.to(camera, { fov: 34, duration: 2.2, ease: 'power2.inOut', onUpdate: () => camera.updateProjectionMatrix() });
   S.tick = (dt, now) => {
     const k = (now - t0) / 1000; a.x = lerp(a.x, tx, dt * 3); a.z = lerp(a.z, tz, dt * 3); a.yaw = Math.atan2(rover.x - a.x, rover.z - a.z);
     poseAstronaut(astro, k < .7 ? 'walk' : 'crouch', dt, 1.5); placeAstro();

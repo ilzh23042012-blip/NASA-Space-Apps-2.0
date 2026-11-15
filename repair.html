@@ -53,7 +53,7 @@
   <ul>
     <li><b>Point</b> to scan · <b>Pinch</b> to grab · <b>Open your fingers</b> to drop · <b>Twist</b> to turn screws and knobs · <b>Open palm</b> to wipe</li>
     <li>Glowing <b>cat's cradle strings</b> stretch between your fingertips: some tasks use them as tape or a tow line.</li>
-    <li>One hand holds and turns the rover, the other scans. With the mouse, drag empty space to turn it.</li>
+    <li>One hand holds and turns the rover, the other scans. <b>Hold still for a moment to lock it</b> (or press L / the 🔒 button) so both hands are free for the cat's cradle. With the mouse, drag empty space to turn it.</li>
   </ul>
   <div class="row" style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
     <button id="start" class="hbtn">Start camera</button>
@@ -70,6 +70,8 @@
 <div id="bar"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="shared/anim.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
 <script src="shared/models.js"></script>
@@ -151,6 +153,52 @@ const RECIPES = {
   opp_comm: { unitDef: C => wholeDef(C), scale: .7, rot: [.3, -.5, 0], pos: [-3.1, -1.3], noPulse: true,
     steps: [{ t: 'comm', short: 'Try to make contact', text: 'Wait for the sky to clear, then send wake-up commands' }] },
 };
+/* Detailed "how to" instructions for each repair step, shown in the repair bay's task panel.
+   An entry that is a pair is [with hands, with the mouse]. Keyed by recipe, then step number. */
+const TAPE_H = [['Raise both hands: the glowing string between your index fingers is the tape', 'Press the mouse on one end of the glowing seam'], ['Lay it over the seam, line it up with it and hold still', 'Drag to the other end of the seam and let go']];
+const BOLT_H = d => [d > 0 ? ['Pinch a bolt and twist your hand clockwise ↻, or circle it clockwise with a fingertip', 'Circle each bolt clockwise ↻ with the pointer'] : ['Pinch a bolt and twist anticlockwise ↺, or circle it anticlockwise with a fingertip', 'Circle each bolt anticlockwise ↺ with the pointer'], 'Each bolt turns green when it is done. Work round them one at a time'];
+const HOW = {
+  a15_steer: [
+    ['The T-handle between the seats steers and drives the rover', ['Pinch the glowing T-handle', 'Press on the glowing T-handle'], ['Move your hand left, then right, past the end marks', 'Drag left, then right, past the end marks'], 'Watch the wheels: which pair turns?'],
+    ['Each steering system had its own circuit breaker on the console', 'Switch "Forward steering" OFF, then back ON. This resets the circuit', 'Leave the others on: rear steering, wheel power and navigation are still needed'],
+    ['Steer left and right again with the T-handle', 'Look at the front wheels: do they turn now?'],
+    ['It is the next morning, and the rover has been switched back on', 'Steer left and right with the T-handle and watch all four wheels']],
+  a15_route: [
+    ['Each circle on the map is a place to collect rocks', ['Point at a stop and hold, or pinch it, to add it. Do it again to remove it', 'Click a stop to add it. Click it again to remove it'], 'Collect at least 6 science points, keep the battery above 25% and stay close enough to walk back to Falcon', 'When the plan shows no warnings, press Drive'],
+    ['Look at a rock to read how it looks', ['Pinch it, carry it over the matching bin and open your fingers', 'Drag it into the matching bin'], 'Dark with bubble holes: basalt. Almost white crystals: anorthosite. Chunks cemented together: breccia']],
+  a17_dust: [
+    ['The fender extension has broken off this wheel, so nothing stops the dust', ['Pinch the wheel and twist, or circle it with a fingertip', 'Circle the wheel with the mouse pointer'], 'Keep turning until the task finishes, and see how much dust flies above the seat line']],
+  a17_fender: [
+    ['First, do what Gene Cernan tried: tape across the broken edge', ...TAPE_H, 'Watch what happens to tape on a dusty fender'],
+    ['The overnight fix was four stiff, laminated maps taped into one sheet', ['Pinch a map, carry it to an empty outline and open your fingers', 'Drag each map onto an empty outline'], 'Fill all four outlines'],
+    ['Two seams join the four maps: one across and one down', ...TAPE_H, 'The strip must cover the whole seam'],
+    [['Pinch the taped sheet and carry it to the glowing spot where the extension broke off', 'Drag the taped sheet to the glowing spot where the extension broke off'], 'Let go there to fit it onto the fender'],
+    ['The crew held the sheet on with clamps borrowed from the portable lights', ...BOLT_H(1)],
+    ['Turn the wheel again, the same way as before', 'Compare how much dust reaches the seat now']],
+  spirit_wheel: [
+    ['For months this right-front wheel had drawn too much current', ['Point at "Send drive command" and hold, or pinch it', 'Click "Send drive command"'], 'Watch the current meter and the wheel at the same time. Send two commands'],
+    ['Remember that nobody can reach Mars to repair it', 'Pick what the team should do. A wrong answer explains why it would not work'],
+    ['With one wheel dead, Spirit drove backwards, dragging the dead wheel behind it', ['Pinch the wheel and move your hand left and right along the soil', 'Hold the mouse button on the wheel and drag it left and right'], 'Go from one end of the trench to the other and back, 3 times', 'Watch what appears under the red top soil']],
+  mer_wheel: [
+    ['Four bolts hold the wheel onto the hub', ...BOLT_H(-1)],
+    [['Pinch the loose wheel and pull it towards you', 'Drag the loose wheel off the hub'], 'Let go over the scrap bin'],
+    ['The spares rack holds three parts. Only one is a wheel for this hub', ['Pinch the right spare and carry it onto the green outline', 'Drag the right spare onto the green outline'], 'A wrong part is rejected, and you are told why'],
+    ['Put the 4 hub bolts back in', ...BOLT_H(1)]],
+  spirit_escape: [
+    ['Spirit is stuck in soft sand that hides a crust at a place called "Troy"', 'Pick a direction: forward, backward or wiggle', ['Pinch and drag the speed slider, then press Try drive', 'Drag the speed slider, then click Try drive'], 'Try at least 3 drives, including a slow one, and read the slip after each']],
+  mer_tow: [
+    ['This one is a what-if: there was never a tow line on Mars', ['Raise both hands. Lay the string between your index fingers across the TOW POINT hook', 'Press the mouse on the TOW POINT hook'], ['Pull your hands apart until the string is taut, then hold', 'Drag far away from the hook and keep the button held'], 'Keep it taut until the meter is full']],
+  spirit_winter: [
+    ['The winter Sun is low, so tilting the panels towards it gives more power', ['Pinch the knob and twist, or circle it with a fingertip', 'Circle the knob with the mouse pointer'], 'Turn until Spirit cannot tilt any further'],
+    ['In winter the panels supply only about 160 units a day', ['Pinch a switch, or point at it and hold, to turn it off', 'Click a switch to turn it off'], 'Turn off everything that is not needed to survive. If something must stay on, you are told why']],
+  opp_storm: [
+    ['The storm grew from 30 May to 10 June 2018', ['Pinch the timeline slider and move it to the right', 'Drag the timeline slider to the right'], 'Press the camera button on different days to photograph the Sun. Take 3 photos', 'The darker the sky, the higher the tau (how much dust blocks sunlight)']],
+  opp_energy: [
+    ['Each system uses energy every day. Turn them on or off', 'Press Run storm to see whether Opportunity lasts 12 days', 'The mission clock uses very little power, but it is the only thing that can wake the rover up']],
+  opp_comm: [
+    ['After the storm, JPL sent more than 1,000 commands to wake Opportunity', 'Drag the timeline until the sky clears', 'Press Transmit to send a wake-up command, and listen for an answer']],
+};
+const howFor = (b, i) => { const k = Object.keys(RECIPES).find(n => RECIPES[n] === b.R), a = k && HOW[k] && HOW[k][i]; return (a || []).map(x => Array.isArray(x) ? x[G.mouseOnly ? 1 : 0] : x); };
 const HINTS = {
   unbolt: ['Pinch a bolt and twist your hand anticlockwise ↺ (let go and re-grip like a wrench), or circle the bolt with a fingertip', 'Circle each bolt anticlockwise ↺ with the mouse pointer'],
   bolt: ['Pinch a screw and twist clockwise ↻, or circle it clockwise with a fingertip', 'Circle each screw clockwise ↻ with the mouse pointer'],
@@ -319,7 +367,7 @@ if (STORY) addEventListener('load', () => setTimeout(() => {
 /* ================= story panels (DOM, usable by hand or mouse) ================= */
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const badge = k => '<span class="badge" style="color:' + LABEL[k][1] + '">' + LABEL[k][0] + '</span>';
-function showPanel(html) { storyEl.innerHTML = '<div class="card">' + html + '</div>'; storyEl.style.display = 'flex'; G.panel = true; VO.lift(true); const p = storyEl.querySelector('.primary'); if (p) p.focus({ preventScroll: true }); }
+function showPanel(html) { storyEl.innerHTML = '<div class="card">' + html + '</div>'; storyEl.style.display = 'flex'; G.panel = true; VO.lift(true); ANIM.card(storyEl.querySelector('.card')); const p = storyEl.querySelector('.primary'); if (p) p.focus({ preventScroll: true }); }
 function hidePanel() { storyEl.style.display = 'none'; storyEl.innerHTML = ''; G.panel = false; VO.lift(false); }
 function showIntro() {
   const C = rover.C;
@@ -363,6 +411,7 @@ const ACT = {
   close() { hidePanel(); },
   back() { exitBench(false); },
   hint() { hint(); },
+  lock() { setLock(!G.locked); },
   rotL() { turnView(-.35, 0); }, rotR() { turnView(.35, 0); }, tiltU() { turnView(0, -.25); }, tiltD() { turnView(0, .25); }, view0() { if (B) B.view = { yaw: 0, pitch: 0 }; },
   learn() { if (B) learnMoreBay(); },
   storyDone() { hidePanel(); setProgress(STORY_ID + '_repair'); G.black = 1; toStory('drive'); },
@@ -382,7 +431,7 @@ document.addEventListener('click', e => { const el = e.target.closest('[data-act
 function setBar() {
   const btn = (act, label) => '<button class="hbtn" data-act="' + act + '">' + label + '</button>';
   if (G.mode === 'bench') barEl.innerHTML = btn('back', '← Back') + btn('rotL', '⟲') + btn('rotR', '⟳') + btn('tiltU', '⤒') + btn('tiltD', '⤓') + btn('view0', 'Reset view') + btn('hint', 'Hint') + btn('learn', 'Learn more');
-  else if (G.mode === 'main') barEl.innerHTML = (STORY ? btn('leave', '← Astronaut') : btn('select', 'Missions')) + btn('hint', 'Hint');
+  else if (G.mode === 'main') barEl.innerHTML = (STORY ? btn('leave', '← Astronaut') : btn('select', 'Missions')) + btn('lock', G.locked ? '🔒 Locked' : '🔓 Free') + btn('hint', 'Hint');
   else barEl.innerHTML = '';
   barEl.style.display = barEl.innerHTML ? 'flex' : 'none';
 }
@@ -405,6 +454,7 @@ addEventListener('keydown', e => {
   else if (k === 'm' || k === 'escape') { if (STORY) ACT.leave(); else toSelect(); }
   else if (k === 't') { G.thermal = !G.thermal; toast('Thermal view ' + (G.thermal ? 'on' : 'off')); }
   else if (k === 'e') { G.lock = !G.lock; toast('Exploded view ' + (G.lock ? 'locked open' : 'follows your hand')); }
+  else if (k === 'l') setLock(!G.locked); else if (k === 'a') { G.auto = !G.auto; toast('Auto-lock ' + (G.auto ? 'on' : 'off')); }
   else if (k === 'h') { G.swap = !G.swap; toast(G.swap ? 'Holding with right-on-screen hand' : 'Holding with left-on-screen hand'); }
   else if (k === 'q' && hands) { G.quality = 1 - G.quality; hands.setOptions({ modelComplexity: G.quality }); toast(G.quality ? 'Tracking: accurate (slower)' : 'Tracking: fast'); }
 });
@@ -631,7 +681,7 @@ function updatePose(dt, w, h, hi, hv) {
       ex = G.lock ? 1 : clamp((k.spread - 1.25) / .5, 0, 1);
       const sig = [c.x / k.sz, c.y / k.sz, roll * 2, pitch * 2, yt * 2, ex * 2];
       if (G.sig) { const d = Math.hypot(...sig.map((v, i) => v - G.sig[i])); G.travel += d; G.still = d < .04 ? G.still + dt : 0; if (G.travel > 1.5) G.armed = true; }
-      G.sig = sig;
+      G.sig = sig; if (G.auto && G.armed && G.still > .8) setLock(true);
     } else {
       G.sig = null; G.still = 0;
       if (performance.now() - MS.t > 3000 && !TS[2].hover) rover.yaw += dt * .4;
@@ -1782,8 +1832,9 @@ function benchHud(ctx, w, h, now) {
   ctx.textAlign = 'center';
   if (st && STEP_DRAW[st.t]) STEP_DRAW[st.t](B, st, ctx, now, w, h);
   const wide = w >= 900, pw = wide ? 360 : w - 32; FONT(ctx, 12);
-  const hist = wide ? wrapLines(ctx, t.when + ': ' + t.history, pw - 24).slice(0, 6) : [], n = B.steps.length;
-  const ph = wide ? 100 + hist.length * 16 + n * 22 : 62; panel(ctx, 16, 16, pw, ph);
+  const hist = wide ? wrapLines(ctx, t.when + ': ' + t.history, pw - 24).slice(0, 4) : [], n = B.steps.length;
+  FONT(ctx, 13); const how = st && wide ? howFor(B, B.si).map((x, i) => wrapLines(ctx, (i + 1) + '. ' + x, pw - 40)) : [], howN = how.reduce((a, l) => a + l.length, 0);
+  const ph = wide ? 100 + hist.length * 16 + n * 22 + (how.length ? 34 + howN * 17 + how.length * 4 : 0) : 62; panel(ctx, 16, 16, pw, ph);
   ctx.textAlign = 'left'; FONT(ctx, 11, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText(rover.C.short.toUpperCase() + '  ·  ' + t.when.toUpperCase(), 28, 34);
   FONT(ctx, 15, 600); ctx.fillStyle = '#dbeaf2'; ctx.fillText(t.title, 28, 54);
   if (wide) {
@@ -1791,6 +1842,11 @@ function benchHud(ctx, w, h, now) {
     ctx.fillStyle = 'rgba(219,234,242,.55)'; hist.forEach((ln, i) => ctx.fillText(ln, 28, 93 + i * 16));
     const y0 = 104 + hist.length * 16;
     B.steps.forEach((s, i) => { const cur = i === B.si; FONT(ctx, 13, cur ? 600 : 400); ctx.fillStyle = s.done ? '#5dff9e' : cur ? '#ffffff' : 'rgba(219,234,242,.45)'; ctx.fillText((s.done ? '✓ ' : cur ? '▶ ' : (i + 1) + '. ') + (s.short || STEP[s.t].short) + (cur ? stepCount(B, s) : ''), 28, y0 + i * 22); });
+    if (how.length) {   // how to do the current step, specific to this part of the rover
+      let y = y0 + n * 22 + 8; ctx.fillStyle = 'rgba(70,217,255,.25)'; ctx.fillRect(28, y - 6, pw - 24, 1);
+      FONT(ctx, 11, 700); ctx.fillStyle = '#46d9ff'; ctx.fillText('HOW TO', 28, y + 10); y += 30;
+      FONT(ctx, 13); ctx.fillStyle = '#eef6fa'; how.forEach(ls => { ls.forEach((ln, j) => ctx.fillText((j ? '    ' : '') + ln, 28, y + j * 17)); y += ls.length * 17 + 4; });
+    }
   }
   const secs = Math.floor((now - rover.t0) / 1000);
   ctx.textAlign = 'center'; void secs;   // (the timer line moved out of the way of the view buttons)
@@ -1830,11 +1886,14 @@ function hud(ctx, w, h, n, now) {
   else if (rover.testT) guide = rover.C.env === 'MOON' ? 'Test drive' : '';
   else if (G.mouseOnly) guide = 'Hover over the glowing part to start the next task. Drag empty space to turn the rover';
   else if (n === 0) guide = 'Raise one hand to pick up the rover';
-  else if (n === 1 && !G.locked) guide = 'Bring your other hand in to scan';
+  else if (n === 1 && !G.locked) guide = 'Bring your other hand in to scan, or hold still to lock the rover';
   else guide = 'Point at the glowing part to start the next task. Point at anything else to learn about it';
+  if (!G.locked && G.armed && G.still > .05 && !G.panel) {   // hold-still progress: a ring that fills, then the rover locks
+    const k = Math.min(1, G.still / .8); ctx.strokeStyle = 'rgba(255,176,0,.9)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(w / 2, h - 80, 16, -PIE / 2, -PIE / 2 + k * PIE * 2); ctx.stroke();
+    F(12, 600); ctx.fillStyle = '#ffb000'; ctx.fillText('HOLD STILL TO LOCK', w / 2, h - 104); }
   F(16, 600); ctx.fillStyle = '#fff'; ctx.fillText(guide, w / 2, h - 40);
   if (now - G.toastT < 4500 && !G.panel) { F(14); ctx.fillStyle = '#ffb000'; wrapLines(ctx, G.toast, Math.min(700, w - 400)).forEach((ln, i) => ctx.fillText(ln, w / 2, 34 + i * 18)); }
-  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('Scroll zoom · M missions · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
+  F(12); ctx.fillStyle = 'rgba(219,234,242,.5)'; ctx.textAlign = 'right'; ctx.fillText('Scroll zoom · M missions · L lock · F hint · T thermal · E explode · H swap hands · S sound · Q tracking · ' + Math.round(fps) + ' fps', w - 16, h - 12);
 }
 </script>
 </body>

@@ -29,13 +29,14 @@ The 2075 expedition is **fiction**. Each rover's history comes from **NASA**, an
 | `story.html` | Rocket travel, third-person astronaut, shared driving system, four drive missions, ending |
 | `repair.html` | The hand-tracked repair bay (formerly v8). Opened with `?story=1&mission=…` it runs only that mission's repairs and returns to the story; opened on its own it is free play with all repairs |
 | `shared/models.js` | Rover 3D models, NASA mission history, and the 2075 story data, used by all three pages |
+| `shared/anim.js` | Small GSAP helpers (cards and lists animating in, eased rocket flight and landing, camera moves). Does nothing if GSAP is missing or reduced motion is on |
 | `shared/voice.js` | Spoken lines with typed, disappearing subtitles and a mute button. Plays `audio/vo/*.mp3` when present, otherwise the browser's speech voice |
 | `VOICEOVER.md`, `audio/vo/`, `tools/` | Voiceover scripts (`lines.csv`) and how to record them with VoiceStudio |
 | `drafts/` | Earlier versions (v6, v7) |
 
 ## Controls
 
-- **Repairs:** you choose at the first repair (with "Never ask again" / "Ask again"); scroll to zoom. Webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse.
+- **Repairs:** you choose at the first repair (with "Never ask again" / "Ask again"); scroll to zoom. Webcam hand tracking (pinch to grab, drag, open fingers to release, twist to turn, point to scan, open palm to wipe, two hands for cat's cradle tape and tow lines), or the mouse. In the main view, hold still for a moment (or press L / the 🔒 button) to lock the rover so both hands are free; A turns auto-lock on or off. Each repair step shows a numbered **How to** list in the task panel.
 - **Walking:** WASD, Shift to run, drag the mouse to look, E to interact.
 - **Dialogue:** Enter once shows the whole subtitle, Enter again skips to the next line. 🔊 mutes the voice.
 - **Driving:** W/S, A/D, Shift for slow and careful, E to interact. Opportunity: F fast-forwards time while parked (panels only charge in daylight).
@@ -54,7 +55,7 @@ then open http://localhost:8000. Camera video is processed in the browser and ne
 ## Credits
 
 - Historical information: NASA (Apollo 15 and 17 mission summaries, NASA History SP-4029; NASA Science pages for Spirit and the Mars Exploration Rovers). Links are in the game.
-- Libraries: [three.js](https://threejs.org) r128, [p5.js](https://p5js.org) 1.9, [MediaPipe Hands](https://developers.google.com/mediapipe).
+- Libraries: [three.js](https://threejs.org) r128, [GSAP](https://gsap.com) 3.12 (animation and easing), [p5.js](https://p5js.org) 1.9, [MediaPipe Hands](https://developers.google.com/mediapipe).
 - Hand-landmark smoothing uses the One Euro filter (Casiez, Roussel & Vogel, CHI 2012), an idea taken from [open-source-hands](https://github.com/abouchedidxcode/open-source-hands) (MIT); the implementation here is our own.
 - Driving feel and chase camera were informed by mrdoob's [Starter Kit Racing](https://github.com/mrdoob/Starter-Kit-Racing) (MIT); no code was copied.
 - 3D models are simplified illustrations built in code, not to scale.
